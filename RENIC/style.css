@@ -983,3 +983,182 @@ input:checked + .slider:before { transform: translateX(20px); }
   z-index: 120; transition: opacity 0.3s ease; pointer-events: none;
 }
 .toast.hidden { opacity: 0; }
+
+/* ==============================================================================
+   BIDIRECTIONAL CLIPBOARD SHARING STYLES
+   ============================================================================== */
+.modal-card-wide {
+  max-width: 440px;
+}
+
+.modal-title-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.modal-badge {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--accent-cyan);
+  background: rgba(0, 240, 255, 0.12);
+  border: 1px solid rgba(0, 240, 255, 0.35);
+  border-radius: 4px;
+  padding: 2px 6px;
+  letter-spacing: 0.5px;
+}
+
+.clip-quick-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.clip-action-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 14px 10px;
+  border-radius: 10px;
+  background: var(--bg-obsidian);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-main);
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  text-align: center;
+}
+
+.clip-action-btn:active {
+  transform: scale(0.96);
+}
+
+.clip-action-btn.btn-send-pc {
+  border-color: rgba(0, 240, 255, 0.4);
+  background: linear-gradient(180deg, rgba(0, 240, 255, 0.08) 0%, rgba(11, 12, 16, 0.95) 100%);
+}
+
+.clip-action-btn.btn-send-pc:hover {
+  border-color: var(--accent-cyan);
+  box-shadow: 0 0 16px rgba(0, 240, 255, 0.25);
+}
+
+.clip-action-btn.btn-pull-phone {
+  border-color: rgba(255, 0, 51, 0.4);
+  background: linear-gradient(180deg, rgba(255, 0, 51, 0.08) 0%, rgba(11, 12, 16, 0.95) 100%);
+}
+
+.clip-action-btn.btn-pull-phone:hover {
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 16px var(--accent-glow);
+}
+
+.clip-btn-icon {
+  font-size: 20px;
+  margin-bottom: 2px;
+}
+
+.clip-btn-label {
+  font-family: var(--font-display);
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+}
+
+.clip-btn-sub {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.clip-direct-inject-btn {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 12px 14px;
+  background: linear-gradient(90deg, rgba(255, 170, 0, 0.12) 0%, rgba(11, 12, 16, 0.95) 100%);
+  border: 1px solid rgba(255, 170, 0, 0.45);
+  border-radius: 10px;
+  color: #FFFFFF;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  margin-bottom: 12px;
+  text-align: left;
+}
+
+.clip-direct-inject-btn:hover {
+  border-color: #FFAA00;
+  box-shadow: 0 0 18px rgba(255, 170, 0, 0.3);
+}
+
+.clip-direct-inject-btn:active {
+  transform: scale(0.97);
+}
+
+.clip-direct-inject-btn .inject-icon {
+  font-size: 24px;
+  color: #FFAA00;
+  text-shadow: 0 0 10px rgba(255, 170, 0, 0.6);
+}
+
+.clip-direct-inject-btn .inject-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.clip-direct-inject-btn .inject-text strong {
+  font-family: var(--font-display);
+  font-size: 12px;
+  letter-spacing: 0.5px;
+  color: #FFFFFF;
+}
+
+.clip-direct-inject-btn .inject-text span {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: #D0D4DC;
+}
+
+.clip-editor-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.clip-editor-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.clip-editor-header .editor-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.5px;
+  color: var(--text-muted);
+}
+
+.clip-editor-header .char-count {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--accent-cyan);
+}
+
+.clip-footer-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.btn-sm-flex {
+  flex: 1;
+  padding: 10px 8px;
+  font-size: 12px;
+  font-weight: 700;
+}
+

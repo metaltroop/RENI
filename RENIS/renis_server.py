@@ -658,6 +658,28 @@ async def system_power_action(payload: Dict[str, str], request: Request):
 
     raise HTTPException(status_code=400, detail=f"Unsupported action: {action}")
 
+def host_get_clipboard() -> str:
+    """Reads clipboard from Windows host with retry."""
+    for _ in range(3):
+        try:
+            import pyperclip
+            val = pyperclip.paste()
+            return val if val is not None else ""
+        except Exception:
+            time.sleep(0.05)
+    return ""
+
+def host_set_clipboard(text: str) -> bool:
+    """Writes clipboard to Windows host with retry."""
+    for _ in range(3):
+        try:
+            import pyperclip
+            pyperclip.copy(text)
+            return True
+        except Exception:
+            time.sleep(0.05)
+    return False
+
 @app.get("/api/clipboard")
 async def get_clipboard_text(token: Optional[str] = Query(None), request: Request = None):
     """Pulls host clipboard contents."""
@@ -666,29 +688,32 @@ async def get_clipboard_text(token: Optional[str] = Query(None), request: Reques
     if not req_token or not verify_jwt_token(req_token):
         raise HTTPException(status_code=401, detail="Unauthorized")
 
-    text = ""
-    try:
-        import pyperclip
-        text = pyperclip.paste()
-    except Exception:
-        pass
-    return {"text": text}
+    text = host_get_clipboard()
+    return {"text": text, "length": len(text)}
 
 @app.post("/api/clipboard")
-async def set_clipboard_text(payload: Dict[str, str], request: Request):
-    """Pushes text into host clipboard."""
+async def set_clipboard_text(payload: Dict[str, Any], request: Request):
+    """
+    Pushes text into host clipboard.
+    If 'paste_now' is True, simulates Ctrl+V into active host window.
+    """
     auth_header = request.headers.get("Authorization", "")
     token = auth_header.replace("Bearer ", "") if "Bearer " in auth_header else ""
     if not token or not verify_jwt_token(token):
         raise HTTPException(status_code=401, detail="Unauthorized")
 
     text = payload.get("text", "")
-    try:
-        import pyperclip
-        pyperclip.copy(text)
-        return {"success": True, "message": "Clipboard updated"}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    paste_now = bool(payload.get("paste_now", False))
+
+    success = host_set_clipboard(text)
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to write to host clipboard")
+
+    if paste_now and pyautogui:
+        await asyncio.sleep(0.08)
+        pyautogui.hotkey('ctrl', 'v')
+
+    return {"success": True, "message": "Clipboard updated", "pasted": paste_now, "length": len(text)}
 
 @app.post("/api/power/wol")
 async def trigger_wol_broadcast(payload: Dict[str, Any], request: Request):

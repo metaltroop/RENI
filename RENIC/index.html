@@ -9,7 +9,7 @@
   <title>RENIC // Remote System Access</title>
   
   <link rel="manifest" href="/manifest.json">
-  <link rel="stylesheet" href="/style.css?v=2.2">
+  <link rel="stylesheet" href="/style.css?v=2.3">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;800&family=Orbitron:wght@600;800;900&family=Rajdhani:wght@500;600;700&display=swap" rel="stylesheet">
@@ -210,6 +210,13 @@
         </div>
 
         <div class="settings-group">
+          <h4>CLIPBOARD SHARING</h4>
+          <button id="btn-settings-open-clip" class="reni-btn btn-secondary">
+            <span>📋 Two-Way Clipboard Sync (Phone ⇄ PC)</span>
+          </button>
+        </div>
+
+        <div class="settings-group">
           <h4>HOST POWER & PRIVACY</h4>
           <div class="toggle-row">
             <div class="toggle-info">
@@ -326,18 +333,62 @@
       </div>
     </div>
 
-    <!-- CLIPBOARD SYNC MODAL -->
+    <!-- TWO-WAY CLIPBOARD SYNC MODAL (PHONE <-> PC) -->
     <div id="clipboard-modal" class="modal-overlay hidden">
-      <div class="modal-card">
+      <div class="modal-card modal-card-wide">
         <div class="modal-header">
-          <h3>HOST CLIPBOARD SYNC</h3>
+          <div class="modal-title-group">
+            <span class="modal-icon">📋</span>
+            <h3>CLIPBOARD SYNC</h3>
+            <span class="modal-badge">PHONE ⇄ PC</span>
+          </div>
           <button id="btn-close-clipboard" class="btn-close">✕</button>
         </div>
+
         <div class="modal-body">
-          <textarea id="clipboard-textarea" placeholder="Clipboard content..."></textarea>
-          <div class="modal-btn-row">
-            <button id="btn-clip-pull" class="reni-btn btn-secondary">⬇️ Pull from Laptop</button>
-            <button id="btn-clip-push" class="reni-btn btn-primary">⬆️ Push to Laptop</button>
+          <!-- 1-Tap Quick Action Deck -->
+          <div class="clip-quick-grid">
+            <button id="btn-clip-phone-to-pc" class="clip-action-btn btn-send-pc" title="Send Phone Clipboard to PC">
+              <span class="clip-btn-icon">📲 ➔ 💻</span>
+              <span class="clip-btn-label">Phone ➔ PC</span>
+              <span class="clip-btn-sub">Send phone clipboard</span>
+            </button>
+            <button id="btn-clip-pc-to-phone" class="clip-action-btn btn-pull-phone" title="Copy PC Clipboard to Phone">
+              <span class="clip-btn-icon">💻 ➔ 📲</span>
+              <span class="clip-btn-label">PC ➔ Phone</span>
+              <span class="clip-btn-sub">Copy PC to phone</span>
+            </button>
+          </div>
+
+          <!-- Instant Active Window Injection -->
+          <button id="btn-clip-paste-active" class="clip-direct-inject-btn" title="Paste directly into the currently focused window on PC">
+            <span class="inject-icon">⚡</span>
+            <div class="inject-text">
+              <strong>Paste Directly into Active PC Window</strong>
+              <span>Sends text & triggers Ctrl+V immediately</span>
+            </div>
+          </button>
+
+          <!-- Text Preview & Editor Area -->
+          <div class="clip-editor-wrapper">
+            <div class="clip-editor-header">
+              <span class="editor-label">CLIPBOARD CONTENT PREVIEW</span>
+              <span id="clip-char-count" class="char-count">0 chars</span>
+            </div>
+            <textarea id="clipboard-textarea" placeholder="Paste or type text here to share between phone and PC..."></textarea>
+          </div>
+
+          <!-- Manual / Textarea Actions -->
+          <div class="clip-footer-actions">
+            <button id="btn-clip-copy-local" class="reni-btn btn-secondary btn-sm-flex" title="Copy text to phone system clipboard">
+              <span>📋 Copy to Phone</span>
+            </button>
+            <button id="btn-clip-push-custom" class="reni-btn btn-primary btn-sm-flex" title="Send text from box to PC">
+              <span>🖥️ Push to PC</span>
+            </button>
+            <button id="btn-clip-clear" class="reni-btn btn-danger btn-sm-flex" title="Clear text">
+              <span>✕</span>
+            </button>
           </div>
         </div>
       </div>
@@ -411,6 +462,6 @@
     <div id="nitro-toast" class="toast hidden"></div>
   </div>
 
-  <script src="/app.js?v=2.2"></script>
+  <script src="/app.js?v=2.3"></script>
 </body>
 </html>

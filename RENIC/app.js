@@ -138,8 +138,14 @@
     clipboardModal: document.getElementById('clipboard-modal'),
     btnCloseClipboard: document.getElementById('btn-close-clipboard'),
     clipboardTextarea: document.getElementById('clipboard-textarea'),
-    btnClipPull: document.getElementById('btn-clip-pull'),
-    btnClipPush: document.getElementById('btn-clip-push'),
+    clipCharCount: document.getElementById('clip-char-count'),
+    btnClipPhoneToPc: document.getElementById('btn-clip-phone-to-pc'),
+    btnClipPcToPhone: document.getElementById('btn-clip-pc-to-phone'),
+    btnClipPasteActive: document.getElementById('btn-clip-paste-active'),
+    btnClipCopyLocal: document.getElementById('btn-clip-copy-local'),
+    btnClipPushCustom: document.getElementById('btn-clip-push-custom'),
+    btnClipClear: document.getElementById('btn-clip-clear'),
+    btnSettingsOpenClip: document.getElementById('btn-settings-open-clip'),
 
     changePinModal: document.getElementById('change-pin-modal'),
     btnClosePinModal: document.getElementById('btn-close-pin-modal'),
@@ -1223,29 +1229,86 @@
     }
   });
 
-  // Clipboard Sync
-  dom.btnClipboardOpen.addEventListener('click', async () => {
-    dom.clipboardModal.classList.remove('hidden');
-    dom.btnClipPull.click();
-  });
+  // ==============================================================================
+  // BIDIRECTIONAL CLIPBOARD SHARING (PHONE ⇄ PC)
+  // ==============================================================================
+  function updateClipCounter() {
+    if (dom.clipCharCount && dom.clipboardTextarea) {
+      dom.clipCharCount.textContent = `${dom.clipboardTextarea.value.length} chars`;
+    }
+  }
 
-  dom.btnCloseClipboard.addEventListener('click', () => {
-    dom.clipboardModal.classList.add('hidden');
-  });
+  if (dom.clipboardTextarea) {
+    dom.clipboardTextarea.addEventListener('input', updateClipCounter);
+  }
 
-  dom.btnClipPull.addEventListener('click', async () => {
+  async function fetchHostClipboard(notify = false) {
+    if (!state.token) return '';
     try {
       const res = await fetch(`/api/clipboard?token=${encodeURIComponent(state.token)}`);
       const data = await res.json();
-      dom.clipboardTextarea.value = data.text || '';
-      showToast("Pulled from Laptop Clipboard");
+      const text = data.text || '';
+      if (dom.clipboardTextarea) {
+        dom.clipboardTextarea.value = text;
+        updateClipCounter();
+      }
+      if (notify) showToast(`Pulled ${text.length} chars from PC`);
+      return text;
     } catch (err) {
-      showToast("Failed to read clipboard");
+      if (notify) showToast("Failed to read PC clipboard");
+      return '';
     }
-  });
+  }
 
-  dom.btnClipPush.addEventListener('click', async () => {
-    const text = dom.clipboardTextarea.value;
+  // 1. PC ➔ Phone: Read PC clipboard and copy directly into phone system clipboard
+  async function copyPcToPhone() {
+    showToast("Reading PC clipboard...", 1500);
+    const text = await fetchHostClipboard(false);
+    if (!text) {
+      showToast("PC clipboard is empty");
+      return;
+    }
+
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      try {
+        await navigator.clipboard.writeText(text);
+        showToast("Copied PC Clipboard to Phone! (Ready to paste anywhere)", 3500);
+        return;
+      } catch (err) {}
+    }
+
+    // Fallback: select textarea for easy manual copy
+    if (dom.clipboardTextarea) {
+      dom.clipboardTextarea.focus();
+      dom.clipboardTextarea.select();
+    }
+    showToast("Fetched PC text — Tap 'Copy to Phone' button below", 3500);
+  }
+
+  // 2. Phone ➔ PC: Read phone system clipboard and push into PC clipboard
+  async function sendPhoneToPc() {
+    let text = '';
+    if (navigator.clipboard && navigator.clipboard.readText) {
+      try {
+        text = await navigator.clipboard.readText();
+      } catch (err) {}
+    }
+
+    if (!text && dom.clipboardTextarea) {
+      text = dom.clipboardTextarea.value.trim();
+    }
+
+    if (!text) {
+      showToast("Phone clipboard is empty. Type or paste text into the box first.");
+      if (dom.clipboardTextarea) dom.clipboardTextarea.focus();
+      return;
+    }
+
+    if (dom.clipboardTextarea) {
+      dom.clipboardTextarea.value = text;
+      updateClipCounter();
+    }
+
     try {
       const res = await fetch('/api/clipboard', {
         method: 'POST',
@@ -1256,11 +1319,156 @@
         body: JSON.stringify({ text })
       });
       const data = await res.json();
-      showToast("Pushed to Laptop Clipboard");
+      if (res.ok && data.success) {
+        showToast(`Sent Phone Clipboard to PC! (${text.length} chars) 💻`, 3000);
+      } else {
+        showToast(data.detail || "Failed to push to PC");
+      }
     } catch (err) {
-      showToast("Failed to write clipboard");
+      showToast("Error sending clipboard to PC");
     }
-  });
+  }
+
+  // 3. Instant Paste: Push to PC and simulate Ctrl+V into active PC window immediately
+  async function pasteIntoPcActiveWindow() {
+    let text = '';
+    if (navigator.clipboard && navigator.clipboard.readText) {
+      try {
+        text = await navigator.clipboard.readText();
+      } catch (err) {}
+    }
+
+    if (!text && dom.clipboardTextarea) {
+      text = dom.clipboardTextarea.value.trim();
+    }
+
+    if (!text) {
+      showToast("Nothing to paste. Copy text on phone or type in box first.");
+      if (dom.clipboardTextarea) dom.clipboardTextarea.focus();
+      return;
+    }
+
+    if (dom.clipboardTextarea) {
+      dom.clipboardTextarea.value = text;
+      updateClipCounter();
+    }
+
+    try {
+      const res = await fetch('/api/clipboard', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${state.token}`
+        },
+        body: JSON.stringify({ text, paste_now: true })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        showToast("⚡ Injected & Pasted into Active PC Window!", 3000);
+        dom.clipboardModal.classList.add('hidden');
+      } else {
+        showToast(data.detail || "Injection failed");
+      }
+    } catch (err) {
+      showToast("Failed to paste into PC");
+    }
+  }
+
+  // Event Listeners for Clipboard Modal & Triggers
+  if (dom.btnClipboardOpen) {
+    dom.btnClipboardOpen.addEventListener('click', () => {
+      dom.clipboardModal.classList.remove('hidden');
+      fetchHostClipboard(false);
+    });
+  }
+
+  if (dom.btnSettingsOpenClip) {
+    dom.btnSettingsOpenClip.addEventListener('click', () => {
+      dom.settingsDrawer.classList.remove('open');
+      dom.clipboardModal.classList.remove('hidden');
+      fetchHostClipboard(false);
+    });
+  }
+
+  if (dom.btnCloseClipboard) {
+    dom.btnCloseClipboard.addEventListener('click', () => {
+      dom.clipboardModal.classList.add('hidden');
+    });
+  }
+
+  if (dom.btnClipPhoneToPc) {
+    dom.btnClipPhoneToPc.addEventListener('click', sendPhoneToPc);
+  }
+
+  if (dom.btnClipPcToPhone) {
+    dom.btnClipPcToPhone.addEventListener('click', copyPcToPhone);
+  }
+
+  if (dom.btnClipPasteActive) {
+    dom.btnClipPasteActive.addEventListener('click', pasteIntoPcActiveWindow);
+  }
+
+  if (dom.btnClipCopyLocal) {
+    dom.btnClipCopyLocal.addEventListener('click', async () => {
+      const text = dom.clipboardTextarea ? dom.clipboardTextarea.value : '';
+      if (!text) {
+        showToast("Text box is empty");
+        return;
+      }
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          await navigator.clipboard.writeText(text);
+          showToast("Copied to Phone Clipboard!");
+        } else {
+          dom.clipboardTextarea.select();
+          document.execCommand('copy');
+          showToast("Copied to Phone Clipboard!");
+        }
+      } catch (err) {
+        dom.clipboardTextarea.select();
+        document.execCommand('copy');
+        showToast("Copied to Phone Clipboard!");
+      }
+    });
+  }
+
+  if (dom.btnClipPushCustom) {
+    dom.btnClipPushCustom.addEventListener('click', async () => {
+      const text = dom.clipboardTextarea ? dom.clipboardTextarea.value : '';
+      if (!text) {
+        showToast("Text box is empty");
+        return;
+      }
+      try {
+        const res = await fetch('/api/clipboard', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${state.token}`
+          },
+          body: JSON.stringify({ text })
+        });
+        const data = await res.json();
+        if (res.ok && data.success) {
+          showToast("Pushed text to PC Clipboard 🖥️");
+        } else {
+          showToast(data.detail || "Failed to push");
+        }
+      } catch (err) {
+        showToast("Failed to push to PC");
+      }
+    });
+  }
+
+  if (dom.btnClipClear) {
+    dom.btnClipClear.addEventListener('click', () => {
+      if (dom.clipboardTextarea) {
+        dom.clipboardTextarea.value = '';
+        updateClipCounter();
+        showToast("Cleared clipboard box");
+      }
+    });
+  }
 
   // Change Master PIN
   dom.btnOpenPinChange.addEventListener('click', () => {
