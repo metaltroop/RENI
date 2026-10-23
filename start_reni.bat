@@ -1,9 +1,9 @@
 @echo off
 setlocal
 
-title RENI // HOST SERVER & TUNNEL LAUNCHER
+title RENI // HOST SERVER AND TUNNEL LAUNCHER
 echo ==============================================================================
-echo   R.E.N.I.S. // LAUNCHING REMOTE ACCESS SYSTEM & INTERNET TUNNEL
+echo   R.E.N.I.S. // LAUNCHING REMOTE ACCESS SYSTEM AND TUNNEL
 echo ==============================================================================
 
 :: Check for Administrative Elevation and re-run as admin if needed

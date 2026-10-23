@@ -1,18 +1,19 @@
-// RENI Service Worker (Nitro Mobile PWA)
-const CACHE_NAME = 'reni-nitro-v1';
-const ASSETS_TO_CACHE = [
+// RENI Service Worker (Mobile PWA v2.2)
+const CACHE_NAME = 'reni-pwa-v2.2';
+const ASSETS_TO_PRECACHE = [
   '/',
-  '/index.html',
-  '/style.css',
-  '/app.js',
+  '/index.html?v=2.2',
+  '/style.css?v=2.2',
+  '/app.js?v=2.2',
   '/manifest.json'
 ];
 
 self.addEventListener('install', (event) => {
+  self.skipWaiting();
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => {
-      return cache.addAll(ASSETS_TO_CACHE);
-    }).then(() => self.skipWaiting())
+      return cache.addAll(ASSETS_TO_PRECACHE);
+    })
   );
 });
 
@@ -22,6 +23,7 @@ self.addEventListener('activate', (event) => {
       return Promise.all(
         keys.map((key) => {
           if (key !== CACHE_NAME) {
+            console.log('[SW] Purging outdated cache:', key);
             return caches.delete(key);
           }
         })
@@ -31,23 +33,25 @@ self.addEventListener('activate', (event) => {
 });
 
 self.addEventListener('fetch', (event) => {
-  // Let WebSocket and API requests bypass cache
+  // Let WebSocket and API requests bypass cache completely
   if (event.request.url.includes('/ws/') || event.request.url.includes('/api/')) {
     return;
   }
 
+  // Network-First with Cache Fallback for dynamic PWA asset delivery
   event.respondWith(
-    caches.match(event.request).then((cachedResponse) => {
-      if (cachedResponse) {
-        // Fetch fresh copy in background
-        fetch(event.request).then((networkResponse) => {
-          if (networkResponse && networkResponse.status === 200) {
-            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, networkResponse));
-          }
-        }).catch(() => {});
-        return cachedResponse;
-      }
-      return fetch(event.request);
-    })
+    fetch(event.request)
+      .then((networkResponse) => {
+        if (networkResponse && networkResponse.status === 200) {
+          const responseToCache = networkResponse.clone();
+          caches.open(CACHE_NAME).then((cache) => {
+            cache.put(event.request, responseToCache);
+          });
+        }
+        return networkResponse;
+      })
+      .catch(() => {
+        return caches.match(event.request);
+      })
   );
 });

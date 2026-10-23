@@ -1,8 +1,8 @@
 /**
  * ==============================================================================
- *  R.E.N.I.S. // REMOTE CLIENT (PWA) v2.0
- *  Collapsible Overlay HUD, Full Landscape Mode, Universal 0.5x-4.0x Zoom,
- *  Scoped Modifiers (Zero Host Keyboard Interference), Task View & Onboarding
+ *  R.E.N.I.S. // REMOTE CLIENT (PWA) v2.1
+ *  Auto-Biometric Authentication on Screen Lock / App Foreground,
+ *  Graceful WebSocket Disconnect Handling, Universal Zoom & Scoped Modifiers
  * ==============================================================================
  */
 
@@ -16,6 +16,7 @@
     controlSocket: null,
     terminalSocket: null,
     telemetryTimer: null,
+    reconnectTimer: null,
     deferredPwaPrompt: null,
     
     // Performance & Streaming
@@ -207,7 +208,6 @@
     showToast("Zoom Reset (1.0x)");
   });
 
-  // FAB Quick Zoom buttons
   if (dom.fabQuickZoomIn) {
     dom.fabQuickZoomIn.addEventListener('click', () => {
       state.zoomScale = Math.min(4.0, state.zoomScale + 0.25);
@@ -242,13 +242,6 @@
 
   dom.btnFabRestore.addEventListener('click', () => {
     setHudCollapsed(false);
-  });
-
-  // Automatically offer compact mode on landscape rotation
-  window.addEventListener('resize', () => {
-    if (window.innerWidth > window.innerHeight) {
-      // Landscape: keep controls responsive
-    }
   });
 
   // ==============================================================================
@@ -307,7 +300,6 @@
     dom.pwaBanner.classList.add('hidden');
   });
 
-  // HTTP Biometrics Flag Guide
   dom.btnOpenHttpGuide.addEventListener('click', () => {
     dom.httpGuideModal.classList.remove('hidden');
   });
@@ -322,8 +314,45 @@
   });
 
   // ==============================================================================
-  // AUTHENTICATION & PIN KEYPAD
+  // AUTHENTICATION & AUTO-LOCK / FINGERPRINT ON SCREEN SLEEP
   // ==============================================================================
+  function lockAppSession() {
+    if (state.streamSocket) {
+      try { state.streamSocket.close(); } catch(e){}
+      state.streamSocket = null;
+    }
+    if (state.controlSocket) {
+      try { state.controlSocket.close(); } catch(e){}
+      state.controlSocket = null;
+    }
+    if (state.telemetryTimer) {
+      clearInterval(state.telemetryTimer);
+      state.telemetryTimer = null;
+    }
+    if (state.reconnectTimer) {
+      clearTimeout(state.reconnectTimer);
+      state.reconnectTimer = null;
+    }
+
+    dom.authOverlay.classList.remove('hidden');
+    dom.streamOverlay.classList.remove('hidden');
+    dom.streamStatusText.textContent = "SESSION LOCKED";
+    state.enteredPin = '';
+    updatePinDisplay();
+  }
+
+  // Auto-lock when phone screen turns off / app minimized, and auto-prompt fingerprint on wake
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+      lockAppSession();
+    } else {
+      dom.authOverlay.classList.remove('hidden');
+      setTimeout(() => {
+        loginWithBiometrics(true);
+      }, 350);
+    }
+  });
+
   function updatePinDisplay() {
     for (let i = 0; i < 6; i++) {
       const dot = document.getElementById(`pdot-${i}`);
@@ -358,7 +387,6 @@
           dom.changePinModal.classList.remove('hidden');
           showToast("Notice: Default Master PIN active. Please change PIN.", 5000);
         } else if (!data.has_biometrics && window.PublicKeyCredential) {
-          // First-time biometric onboarding prompt
           setTimeout(() => {
             dom.firstBioModal.classList.remove('hidden');
           }, 800);
@@ -427,18 +455,20 @@
     return bytes.buffer;
   }
 
-  async function loginWithBiometrics() {
+  async function loginWithBiometrics(isAutoPrompt = false) {
     if (!window.PublicKeyCredential) {
-      showToast("Biometrics not available on this browser/context");
+      if (!isAutoPrompt) showToast("Biometrics not available on this browser/context");
       return;
     }
 
     try {
-      dom.authFeedback.textContent = "Requesting biometric challenge...";
+      if (!isAutoPrompt) dom.authFeedback.textContent = "Requesting biometric challenge...";
       const optRes = await fetch('/api/auth/webauthn/login-options', { method: 'POST' });
       if (!optRes.ok) {
-        const err = await optRes.json();
-        dom.authFeedback.textContent = err.detail || "No biometrics registered";
+        if (!isAutoPrompt) {
+          const err = await optRes.json();
+          dom.authFeedback.textContent = err.detail || "No biometrics registered";
+        }
         return;
       }
 
@@ -477,15 +507,15 @@
         dom.authOverlay.classList.add('hidden');
         showToast("Biometric Authenticated: Session Active");
         initializeSession();
-      } else {
+      } else if (!isAutoPrompt) {
         dom.authFeedback.textContent = data.detail || "Biometric validation failed";
       }
     } catch (err) {
-      dom.authFeedback.textContent = "Biometric prompt cancelled or failed";
+      if (!isAutoPrompt) dom.authFeedback.textContent = "Biometric prompt cancelled";
     }
   }
 
-  dom.btnBiometricLogin.addEventListener('click', loginWithBiometrics);
+  dom.btnBiometricLogin.addEventListener('click', () => loginWithBiometrics(false));
 
   async function registerBiometrics() {
     if (!window.PublicKeyCredential) {
@@ -589,7 +619,10 @@
   }
 
   function initStreamWebSocket() {
-    if (!state.token) return;
+    if (!state.token) {
+      handleSessionExpired();
+      return;
+    }
     if (state.streamSocket) {
       try { state.streamSocket.close(); } catch(e){}
     }
@@ -631,11 +664,28 @@
       } catch (err) {}
     };
 
-    state.streamSocket.onclose = () => {
+    state.streamSocket.onclose = (event) => {
       dom.connectionStatus.classList.add('disconnected');
-      dom.streamOverlay.classList.remove('hidden');
-      dom.streamStatusText.textContent = "STREAM DISCONNECTED // RECONNECTING...";
-      setTimeout(initStreamWebSocket, 2000);
+      
+      // If server rejected token (1008 / Policy Violation), immediately expire session and show login
+      if (event.code === 1008 || event.code === 4401) {
+        handleSessionExpired();
+        return;
+      }
+
+      // Reconnect only if we still have an authenticated session and not locked
+      if (state.token && dom.authOverlay.classList.contains('hidden')) {
+        dom.streamOverlay.classList.remove('hidden');
+        dom.streamStatusText.textContent = "STREAM RECONNECTING...";
+        if (!state.reconnectTimer) {
+          state.reconnectTimer = setTimeout(() => {
+            state.reconnectTimer = null;
+            if (state.token && dom.authOverlay.classList.contains('hidden')) {
+              initStreamWebSocket();
+            }
+          }, 2000);
+        }
+      }
     };
 
     state.streamSocket.onerror = () => {
@@ -662,8 +712,14 @@
     const wsUrl = `${proto}//${location.host}/ws/control?token=${encodeURIComponent(state.token)}`;
     state.controlSocket = new WebSocket(wsUrl);
 
-    state.controlSocket.onclose = () => {
-      setTimeout(initControlWebSocket, 2000);
+    state.controlSocket.onclose = (event) => {
+      if (event.code === 1008) {
+        handleSessionExpired();
+        return;
+      }
+      if (state.token && dom.authOverlay.classList.contains('hidden')) {
+        setTimeout(initControlWebSocket, 2000);
+      }
     };
   }
 
@@ -813,7 +869,6 @@
       );
       const distDelta = Math.abs(curDist - initialPinchDist);
 
-      // If finger distance changes by > 12px, activate Universal Pinch-to-Zoom
       if (distDelta > 12 || isPinching) {
         isPinching = true;
         const scaleRatio = curDist / (initialPinchDist || 1);
@@ -829,7 +884,6 @@
         state.panY = initialPan.y + (curMidpoint.y - initialMidpoint.y);
         applyCanvasTransform();
       } else if (!isPinching) {
-        // Parallel two-finger vertical drag: mouse wheel scroll
         const curY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
         const deltaY = curY - twoFingerStartY;
         if (Math.abs(deltaY) > 8) {
@@ -858,7 +912,6 @@
 
     if (isTwoFingerGesture) {
       if (!hasMovedSignificantly && !isPinching && duration < 300) {
-        // Two-Finger Tap: Right Click with scoped modifiers
         sendControl({
           type: "mouse_click",
           button: "right",
@@ -871,7 +924,6 @@
     }
 
     if (!hasMovedSignificantly && duration < 250) {
-      // Double tap reset zoom if zoomed in/out
       const timeSinceLastTap = Date.now() - lastTapTime;
       if (timeSinceLastTap < 280 && Math.abs(state.zoomScale - 1.0) > 0.05) {
         resetZoom();
@@ -889,7 +941,6 @@
         }
       }
 
-      // Single Tap: Left Click with scoped modifiers
       sendControl({
         type: "mouse_click",
         button: "left",
@@ -899,7 +950,6 @@
     }
   });
 
-  // Toggle Input Mode (Touchpad vs Direct Touch)
   function toggleInputMode() {
     if (state.inputMode === 'trackpad') {
       state.inputMode = 'direct';
@@ -954,7 +1004,6 @@
     dom.mobileKeyCapture.value = '';
   });
 
-  // Sticky Modifiers (Scoped to remote commands only)
   document.querySelectorAll('.dock-btn.mod-toggle').forEach(btn => {
     btn.addEventListener('click', () => {
       const key = btn.getAttribute('data-key');
@@ -970,7 +1019,6 @@
     });
   });
 
-  // Shortcut & Task View Buttons
   document.querySelectorAll('.dock-btn[data-key]:not(.mod-toggle)').forEach(btn => {
     btn.addEventListener('click', () => {
       const key = btn.getAttribute('data-key');
@@ -1256,20 +1304,31 @@
 
   // Logout
   dom.btnLogout.addEventListener('click', () => {
-    localStorage.removeItem('reni_jwt_token');
-    state.token = '';
-    location.reload();
+    handleSessionExpired();
   });
 
   function handleSessionExpired() {
-    showToast("Session Expired: Please Login");
-    dom.authOverlay.classList.remove('hidden');
     state.token = '';
     localStorage.removeItem('reni_jwt_token');
-    if (state.streamSocket) state.streamSocket.close();
-    if (state.controlSocket) state.controlSocket.close();
-    if (state.terminalSocket) state.terminalSocket.close();
+    if (state.streamSocket) {
+      try { state.streamSocket.close(); } catch(e){}
+      state.streamSocket = null;
+    }
+    if (state.controlSocket) {
+      try { state.controlSocket.close(); } catch(e){}
+      state.controlSocket = null;
+    }
+    if (state.terminalSocket) {
+      try { state.terminalSocket.close(); } catch(e){}
+      state.terminalSocket = null;
+    }
     if (state.telemetryTimer) clearInterval(state.telemetryTimer);
+    if (state.reconnectTimer) clearTimeout(state.reconnectTimer);
+
+    dom.authOverlay.classList.remove('hidden');
+    dom.streamOverlay.classList.add('hidden');
+    state.enteredPin = '';
+    updatePinDisplay();
   }
 
   // ==============================================================================
@@ -1281,12 +1340,27 @@
     startTelemetryPolling();
   }
 
-  // Boot check
+  // Boot check & automatic biometric prompt
   if (state.token) {
-    dom.authOverlay.classList.add('hidden');
-    initializeSession();
+    // Validate existing token
+    fetch(`/api/system/telemetry?token=${encodeURIComponent(state.token)}`)
+      .then(res => {
+        if (res.ok) {
+          // On fresh visit, lock app and prompt for fingerprint
+          lockAppSession();
+          setTimeout(() => loginWithBiometrics(true), 350);
+        } else {
+          handleSessionExpired();
+          setTimeout(() => loginWithBiometrics(true), 350);
+        }
+      })
+      .catch(() => {
+        lockAppSession();
+        setTimeout(() => loginWithBiometrics(true), 350);
+      });
   } else {
     dom.authOverlay.classList.remove('hidden');
+    setTimeout(() => loginWithBiometrics(true), 350);
   }
 
   // Service Worker Registration
