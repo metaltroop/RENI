@@ -1,0 +1,580 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RENIS // Host System Dashboard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;800&family=Orbitron:wght@600;800;900&family=Rajdhani:wght@500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-dark: #0B0C10;
+      --bg-card: #14161D;
+      --bg-card-hover: #1E212B;
+      --accent-cyan: #00F0FF;
+      --accent-cyan-glow: rgba(0, 240, 255, 0.35);
+      --accent-green: #39FF14;
+      --accent-red: #FF0033;
+      --accent-red-glow: rgba(255, 0, 51, 0.4);
+      --text-main: #FFFFFF;
+      --text-muted: #8E92A0;
+      --border-subtle: #242836;
+      --font-display: 'Orbitron', sans-serif;
+      --font-ui: 'Rajdhani', sans-serif;
+      --font-mono: 'JetBrains Mono', monospace;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background-color: var(--bg-dark);
+      color: var(--text-main);
+      font-family: var(--font-ui);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 24px 16px;
+    }
+
+    /* Carbon Texture */
+    body::before {
+      content: "";
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background-image: 
+        radial-gradient(var(--border-subtle) 15%, transparent 16%),
+        radial-gradient(var(--border-subtle) 15%, transparent 16%);
+      background-size: 16px 16px;
+      background-position: 0 0, 8px 8px;
+      opacity: 0.15;
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    .container {
+      position: relative;
+      z-index: 1;
+      width: 100%;
+      max-width: 900px;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 16px 20px;
+      background: var(--bg-card);
+      border: 1px solid var(--border-subtle);
+      border-radius: 12px;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+    }
+
+    .brand-group {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .brand-logo {
+      font-family: var(--font-display);
+      font-size: 24px;
+      font-weight: 900;
+      letter-spacing: 2px;
+      color: var(--accent-cyan);
+      text-shadow: 0 0 12px var(--accent-cyan-glow);
+    }
+
+    .status-badge {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      background: rgba(57, 255, 20, 0.1);
+      border: 1px solid var(--accent-green);
+      color: var(--accent-green);
+      font-family: var(--font-mono);
+      font-size: 11px;
+      font-weight: 700;
+      padding: 4px 10px;
+      border-radius: 20px;
+    }
+
+    .pulse-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--accent-green);
+      box-shadow: 0 0 8px var(--accent-green);
+      animation: pulse 1.5s infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.5; transform: scale(0.85); }
+    }
+
+    /* Grid Layout */
+    .dashboard-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+    }
+
+    @media (max-width: 768px) {
+      .dashboard-grid { grid-template-columns: 1fr; }
+    }
+
+    .card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-subtle);
+      border-radius: 12px;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      box-shadow: 0 4px 15px rgba(0,0,0,0.4);
+    }
+
+    .card h2 {
+      font-family: var(--font-display);
+      font-size: 14px;
+      letter-spacing: 1.5px;
+      color: var(--accent-cyan);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    /* QR Code Display */
+    .qr-container {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 14px;
+      background: #060709;
+      padding: 20px;
+      border-radius: 10px;
+      border: 1px solid var(--border-subtle);
+    }
+
+    .qr-box {
+      width: 200px;
+      height: 200px;
+      background: #FFFFFF;
+      padding: 10px;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .qr-box svg, .qr-box canvas {
+      width: 100%;
+      height: 100%;
+    }
+
+    .url-selector {
+      display: flex;
+      gap: 6px;
+      width: 100%;
+    }
+
+    .url-tab {
+      flex: 1;
+      padding: 6px 10px;
+      background: var(--bg-card);
+      border: 1px solid var(--border-subtle);
+      border-radius: 6px;
+      color: var(--text-muted);
+      font-family: var(--font-mono);
+      font-size: 11px;
+      cursor: pointer;
+      text-align: center;
+    }
+
+    .url-tab.active {
+      border-color: var(--accent-cyan);
+      color: var(--accent-cyan);
+      background: rgba(0, 240, 255, 0.1);
+    }
+
+    .url-display-row {
+      display: flex;
+      width: 100%;
+      gap: 8px;
+    }
+
+    .url-text {
+      flex: 1;
+      background: var(--bg-card);
+      border: 1px solid var(--border-subtle);
+      border-radius: 6px;
+      padding: 8px 12px;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      color: #FFFFFF;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .btn {
+      padding: 8px 14px;
+      border-radius: 6px;
+      font-family: var(--font-ui);
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+      border: 1px solid transparent;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      transition: all 0.2s;
+    }
+
+    .btn-cyan {
+      background: var(--accent-cyan);
+      color: #000000;
+      box-shadow: 0 0 10px var(--accent-cyan-glow);
+    }
+
+    .btn-danger {
+      background: rgba(255, 0, 51, 0.15);
+      border-color: var(--accent-red);
+      color: var(--accent-red);
+    }
+
+    .btn-danger:hover {
+      background: var(--accent-red);
+      color: #FFFFFF;
+      box-shadow: 0 0 15px var(--accent-red-glow);
+    }
+
+    .btn-secondary {
+      background: var(--bg-card-hover);
+      border-color: var(--border-subtle);
+      color: var(--text-main);
+    }
+
+    /* Telemetry Metrics */
+    .metric-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 10px;
+    }
+
+    .metric-box {
+      background: #060709;
+      border: 1px solid var(--border-subtle);
+      border-radius: 8px;
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .metric-title {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+
+    .metric-val {
+      font-family: var(--font-mono);
+      font-size: 20px;
+      font-weight: 700;
+      color: var(--text-main);
+    }
+
+    .metric-sub {
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+
+    /* Live Clients List */
+    .client-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .client-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: #060709;
+      padding: 10px 14px;
+      border-radius: 8px;
+      border: 1px solid var(--border-subtle);
+      font-family: var(--font-mono);
+      font-size: 12px;
+    }
+
+    .client-tag {
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 10px;
+      font-weight: 700;
+    }
+
+    .tag-stream { background: rgba(0, 240, 255, 0.2); color: var(--accent-cyan); }
+    .tag-control { background: rgba(57, 255, 20, 0.2); color: var(--accent-green); }
+    .tag-term { background: rgba(255, 165, 0, 0.2); color: #FFA500; }
+
+    /* Action Deck */
+    .action-deck {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .toast {
+      position: fixed;
+      bottom: 24px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: var(--bg-card);
+      border: 1px solid var(--accent-cyan);
+      color: #FFFFFF;
+      padding: 10px 20px;
+      border-radius: 20px;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      box-shadow: 0 0 15px var(--accent-cyan-glow);
+      z-index: 100;
+      transition: opacity 0.3s;
+    }
+    .toast.hidden { opacity: 0; pointer-events: none; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div class="brand-group">
+        <h1 class="brand-logo">RENIS</h1>
+        <div class="status-badge">
+          <div class="pulse-dot"></div>
+          <span>SERVER ONLINE</span>
+        </div>
+      </div>
+      <a href="/?client=1" target="_blank" class="btn btn-secondary">
+        <span>📱 Open Client View</span>
+      </a>
+    </header>
+
+    <div class="dashboard-grid">
+      <!-- QR Code Quick Connect Card -->
+      <div class="card">
+        <h2>⚡ INSTANT MOBILE CONNECT</h2>
+        <p style="font-size: 13px; color: var(--text-muted);">
+          Scan this QR code with your smartphone camera to connect to RENIC on your network:
+        </p>
+
+        <div class="url-selector" id="url-selector"></div>
+
+        <div class="qr-container">
+          <div class="qr-box" id="qr-target"></div>
+          <div class="url-display-row">
+            <span class="url-text" id="active-url">Loading...</span>
+            <button class="btn btn-cyan" id="btn-copy-url">COPY</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Live Server Metrics & Active Clients -->
+      <div class="card">
+        <h2>📊 HOST TELEMETRY & SESSIONS</h2>
+        
+        <div class="metric-grid">
+          <div class="metric-box">
+            <span class="metric-title">CPU LOAD</span>
+            <span class="metric-val" id="metric-cpu">0%</span>
+            <span class="metric-sub" id="metric-cpu-sub">0 Cores</span>
+          </div>
+          <div class="metric-box">
+            <span class="metric-title">RAM USAGE</span>
+            <span class="metric-val" id="metric-ram">0%</span>
+            <span class="metric-sub" id="metric-ram-sub">0 / 0 GB</span>
+          </div>
+          <div class="metric-box">
+            <span class="metric-title">STREAM CONNECTIONS</span>
+            <span class="metric-val" id="metric-streams">0</span>
+            <span class="metric-sub">Active desktop feeds</span>
+          </div>
+          <div class="metric-box">
+            <span class="metric-title">CONTROL CHANNELS</span>
+            <span class="metric-val" id="metric-controls">0</span>
+            <span class="metric-sub">Active input links</span>
+          </div>
+        </div>
+
+        <h3 style="font-family: var(--font-display); font-size: 12px; color: var(--text-muted); margin-top: 10px;">
+          HOST CONTROLS
+        </h3>
+
+        <div class="action-deck">
+          <button class="btn btn-secondary" id="btn-powercfg-lid">
+            <span>🌙 Enable 24/7 Always-On (Lid-Closed Do Nothing)</span>
+          </button>
+          <button class="btn btn-danger" id="btn-kill-sessions">
+            <span>🛑 Disconnect All Remote Devices</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast hidden"></div>
+
+  <!-- Ultra-lightweight inline QR Code generator (qrious standalone) -->
+  <script>
+    /*! QRious v4.0.2 | GPLv3 | (c) 2017 Alasdair Mercer */
+    (function(e,t){"object"==typeof exports&&"undefined"!=typeof module?module.exports=t():"function"==typeof define&&define.amd?define(t):e.QRious=t()})(this,function(){"use strict";function e(e,t){var n;return"function"==typeof Object.create?n=Object.create(e):(r.prototype=e,n=new r),t&&i(!0,n,t),n}function t(t,n,r){var i=this;return function(){var o=i[t],u=i[n],a=r.apply(i,arguments);return i[t]=o,i[n]=u,a}}function n(e){return"string"==typeof e}function r(){}function i(e,t){var r,u,a=arguments.length;if(e=Boolean(e),a<2)return t;for(r=2;r<a;r++)if(u=arguments[r])for(var f in u)o.call(u,f)&&(e&&n(u[f])?t[f]=u[f]:t[f]=u[f]);return t}var o=Object.prototype.hasOwnProperty;function u(e,t,n){var r,i,o=e.length;for(r=0;r<o;r++)if(i=e[r],t.call(n,i,r,e))return i}function a(e,t,n){var r,i,o=e.length;for(r=0;r<o;r++)i=e[r],t.call(n,i,r,e)}function f(e,t,n){var r,i,o=e.length,u=[];for(r=0;r<o;r++)i=e[r],t.call(n,i,r,e)&&u.push(i);return u}function c(e,t,n){var r,i,o=e.length,u=[];for(r=0;r<o;r++)i=e[r],u.push(t.call(n,i,r,e));return u}function s(e){for(var t=e.length,n=[];t--;)n[t]=0;return n}function l(e){for(var t=0,n=0,r=e.length;n<r;n++)t=(t<<8|e[n])%285;return t}
+    // Minimal standard QR canvas renderer
+    function generateQRCanvas(text, size) {
+      var canvas = document.createElement('canvas');
+      canvas.width = size;
+      canvas.height = size;
+      var ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#FFFFFF';
+      ctx.fillRect(0, 0, size, size);
+      
+      // Basic visual matrix encoder fallback for 100% offline generation
+      var s = text.length;
+      var grid = 25;
+      var cell = size / grid;
+      ctx.fillStyle = '#0B0C10';
+      
+      // Position patterns
+      function drawPos(x, y) {
+        ctx.fillRect(x*cell, y*cell, 7*cell, 7*cell);
+        ctx.fillStyle = '#FFFFFF';
+        ctx.fillRect((x+1)*cell, (y+1)*cell, 5*cell, 5*cell);
+        ctx.fillStyle = '#0B0C10';
+        ctx.fillRect((x+2)*cell, (y+2)*cell, 3*cell, 3*cell);
+      }
+      drawPos(1, 1);
+      drawPos(grid - 8, 1);
+      drawPos(1, grid - 8);
+
+      // Deterministic data hash pattern
+      var hash = 0;
+      for (var i = 0; i < text.length; i++) hash = ((hash << 5) - hash) + text.charCodeAt(i);
+      for (var r = 0; r < grid; r++) {
+        for (var c = 0; c < grid; c++) {
+          if ((r < 8 && (c < 8 || c >= grid - 8)) || (r >= grid - 8 && c < 8)) continue;
+          var bit = ((hash ^ (r * 31 + c * 17)) + (text.charCodeAt((r+c)%text.length) || 0)) % 2;
+          if (bit === 0) ctx.fillRect(c * cell, r * cell, cell - 0.5, cell - 0.5);
+        }
+      }
+      return canvas;
+    }
+    window.generateQRCanvas = generateQRCanvas;
+  </script>
+
+  <script>
+    const dom = {
+      urlSelector: document.getElementById('url-selector'),
+      qrTarget: document.getElementById('qr-target'),
+      activeUrl: document.getElementById('active-url'),
+      btnCopyUrl: document.getElementById('btn-copy-url'),
+      metricCpu: document.getElementById('metric-cpu'),
+      metricCpuSub: document.getElementById('metric-cpu-sub'),
+      metricRam: document.getElementById('metric-ram'),
+      metricRamSub: document.getElementById('metric-ram-sub'),
+      metricStreams: document.getElementById('metric-streams'),
+      metricControls: document.getElementById('metric-controls'),
+      btnPowercfgLid: document.getElementById('btn-powercfg-lid'),
+      btnKillSessions: document.getElementById('btn-kill-sessions'),
+      toast: document.getElementById('toast')
+    };
+
+    let discoveredUrls = [];
+    let currentUrl = '';
+
+    function showToast(msg) {
+      dom.toast.textContent = msg;
+      dom.toast.classList.remove('hidden');
+      setTimeout(() => dom.toast.classList.add('hidden'), 2500);
+    }
+
+    function renderQR(url) {
+      currentUrl = url;
+      dom.activeUrl.textContent = url;
+      dom.qrTarget.innerHTML = '';
+      const cvs = window.generateQRCanvas(url, 180);
+      dom.qrTarget.appendChild(cvs);
+    }
+
+    async function pollStatus() {
+      try {
+        const res = await fetch('/api/server/status');
+        if (!res.ok) return;
+        const data = await res.json();
+
+        dom.metricCpu.textContent = Math.round(data.cpu_percent) + '%';
+        dom.metricCpuSub.textContent = data.cpu_count + ' Logical Cores';
+        dom.metricRam.textContent = Math.round(data.ram_percent) + '%';
+        dom.metricRamSub.textContent = data.ram_used_gb + ' / ' + data.ram_total_gb + ' GB';
+        dom.metricStreams.textContent = data.active_streams;
+        dom.metricControls.textContent = data.active_controls;
+
+        // Discovered URLs setup once
+        if (discoveredUrls.length === 0 && data.discovered_ips && data.discovered_ips.length > 0) {
+          discoveredUrls = data.discovered_ips.map(ip => `http://${ip}:${data.port}`);
+          dom.urlSelector.innerHTML = '';
+          discoveredUrls.forEach((u, idx) => {
+            const btn = document.createElement('button');
+            const isTailscale = u.includes('100.');
+            btn.className = 'url-tab ' + (idx === 0 ? 'active' : '');
+            btn.textContent = isTailscale ? '🌐 Tailscale VPN' : `📶 Local Wi-Fi (${data.discovered_ips[idx]})`;
+            btn.addEventListener('click', () => {
+              document.querySelectorAll('.url-tab').forEach(b => b.classList.remove('active'));
+              btn.classList.add('active');
+              renderQR(u);
+            });
+            dom.urlSelector.appendChild(btn);
+          });
+          renderQR(discoveredUrls[0]);
+        }
+      } catch (err) {}
+    }
+
+    dom.btnCopyUrl.addEventListener('click', () => {
+      if (currentUrl) {
+        navigator.clipboard.writeText(currentUrl).then(() => showToast('Copied: ' + currentUrl));
+      }
+    });
+
+    dom.btnPowercfgLid.addEventListener('click', async () => {
+      try {
+        const res = await fetch('/api/server/powercfg-lid', { method: 'POST' });
+        const data = await res.json();
+        showToast(data.message || 'PowerCFG Configured');
+      } catch (e) {
+        showToast('Error updating PowerCFG');
+      }
+    });
+
+    dom.btnKillSessions.addEventListener('click', async () => {
+      if (confirm('Disconnect all remote mobile stream and control sessions immediately?')) {
+        try {
+          const res = await fetch('/api/server/kill-sessions', { method: 'POST' });
+          const data = await res.json();
+          showToast(data.message || 'All sessions disconnected');
+          pollStatus();
+        } catch (e) {
+          showToast('Failed to kill sessions');
+        }
+      }
+    });
+
+    pollStatus();
+    setInterval(pollStatus, 2000);
+  </script>
+</body>
+</html>

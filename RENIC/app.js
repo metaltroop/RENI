@@ -1,8 +1,8 @@
 /**
  * ==============================================================================
- *  R.E.N.I.S. // REMOTE NITRO CLIENT (PWA)
- *  Dual-Mode Touch Engine, Low-Latency Canvas Stream, PowerShell Terminal Drawer,
- *  WebAuthn + Master PIN Auth, Nitro Sense HUD & N2O Overclock
+ *  R.E.N.I.S. // REMOTE CLIENT (PWA) v2.0
+ *  Collapsible Overlay HUD, Full Landscape Mode, Universal 0.5x-4.0x Zoom,
+ *  Scoped Modifiers (Zero Host Keyboard Interference), Task View & Onboarding
  * ==============================================================================
  */
 
@@ -16,55 +16,73 @@
     controlSocket: null,
     terminalSocket: null,
     telemetryTimer: null,
+    deferredPwaPrompt: null,
     
     // Performance & Streaming
     fps: 20,
     scale: 0.75,
     quality: 65,
-    overclockActive: false,
+    highFreqActive: false,
     
     // Touch & Input
     inputMode: 'trackpad', // 'trackpad' | 'direct'
     trackpadSensitivity: 1.5,
     stickyModifiers: new Set(),
     
-    // Canvas & Video Resolution
+    // Canvas & Universal Zoom (0.5x to 4.0x)
     canvasWidth: 1920,
     canvasHeight: 1080,
     zoomScale: 1.0,
     panX: 0,
     panY: 0,
     
-    // Auth UI
+    // UI State
+    hudCollapsed: false,
     enteredPin: '',
     
-    // Easter Egg #2 Tap Counter
-    n2oTapCount: 0,
-    n2oLastTapTime: 0
+    // Hidden Easter Egg Tap Counter
+    eggTapCount: 0,
+    eggLastTapTime: 0
   };
 
   // DOM Element Selectors
   const dom = {
-    // Header & HUD
-    header: document.getElementById('nitro-header'),
+    appContainer: document.getElementById('app-container'),
+    header: document.getElementById('reni-header'),
     connectionStatus: document.getElementById('connection-status'),
-    n2oBadge: document.getElementById('n2o-badge'),
+    easterEggTrigger: document.getElementById('easter-egg-trigger'),
+    
+    // Telemetry HUD
     cpuFill: document.getElementById('cpu-fill'),
     cpuVal: document.getElementById('cpu-val'),
     ramFill: document.getElementById('ram-fill'),
     ramVal: document.getElementById('ram-val'),
     batteryIcon: document.getElementById('battery-icon'),
     batteryVal: document.getElementById('battery-val'),
+    
+    // Header Controls
     btnModeToggle: document.getElementById('btn-mode-toggle'),
     modeIcon: document.getElementById('mode-icon'),
+    modeText: document.getElementById('mode-text'),
+    btnZoomIn: document.getElementById('btn-zoom-in'),
+    btnZoomOut: document.getElementById('btn-zoom-out'),
+    btnZoomReset: document.getElementById('btn-zoom-reset'),
+    btnMinimizeHud: document.getElementById('btn-minimize-hud'),
     btnOpenTerminal: document.getElementById('btn-open-terminal'),
     btnOpenSettings: document.getElementById('btn-open-settings'),
+
+    // Minimized Floating Action Pill
+    fabContainer: document.getElementById('floating-fab-container'),
+    btnFabRestore: document.getElementById('btn-fab-restore'),
+    fabQuickMode: document.getElementById('fab-quick-mode'),
+    fabQuickZoomIn: document.getElementById('fab-quick-zoom-in'),
+    fabQuickZoomOut: document.getElementById('fab-quick-zoom-out'),
+    fabQuickKey: document.getElementById('fab-quick-key'),
 
     // Viewport & Canvas
     viewportWrapper: document.getElementById('viewport-wrapper'),
     canvas: document.getElementById('stream-canvas'),
     ctx: document.getElementById('stream-canvas').getContext('2d'),
-    virtualCursor: document.getElementById('virtual-cursor'),
     streamOverlay: document.getElementById('stream-overlay'),
     streamStatusText: document.getElementById('stream-status-text'),
 
@@ -73,6 +91,20 @@
     mobileKeyCapture: document.getElementById('mobile-key-capture'),
     btnKeyboardTrigger: document.getElementById('btn-keyboard-trigger'),
     btnClipboardOpen: document.getElementById('btn-clipboard-open'),
+
+    // Onboarding Banners & Modals
+    pwaBanner: document.getElementById('pwa-install-banner'),
+    btnPwaInstall: document.getElementById('btn-pwa-install'),
+    btnPwaDismiss: document.getElementById('btn-pwa-dismiss'),
+    firstBioModal: document.getElementById('first-biometrics-modal'),
+    btnAcceptBio: document.getElementById('btn-accept-bio-prompt'),
+    btnSkipBio: document.getElementById('btn-skip-bio-prompt'),
+    btnDismissBio: document.getElementById('btn-dismiss-bio-prompt'),
+    httpGuideModal: document.getElementById('http-guide-modal'),
+    btnOpenHttpGuide: document.getElementById('btn-open-http-guide'),
+    btnCloseHttpGuide: document.getElementById('btn-close-http-guide'),
+    btnCloseHttpGuideOk: document.getElementById('btn-close-http-guide-ok'),
+    btnCopyFlagsUrl: document.getElementById('btn-copy-flags-url'),
 
     // Drawers
     terminalDrawer: document.getElementById('terminal-drawer'),
@@ -124,11 +156,6 @@
     toast: document.getElementById('nitro-toast')
   };
 
-  // Ensure DOM virtual cursor is hidden; real cursor is rendered directly on stream frames
-  if (dom.virtualCursor) {
-    dom.virtualCursor.classList.add('hidden');
-  }
-
   // ==============================================================================
   // TOAST NOTIFICATION UTILITY
   // ==============================================================================
@@ -143,16 +170,17 @@
   }
 
   // ==============================================================================
-  // CANVAS TRANSFORM (PINCH-TO-ZOOM & PAN)
+  // UNIVERSAL ZOOM & PAN (0.5x to 4.0x)
   // ==============================================================================
   function applyCanvasTransform() {
-    if (state.zoomScale <= 1.01) {
-      state.zoomScale = 1.0;
-      state.panX = 0;
-      state.panY = 0;
+    state.zoomScale = Math.max(0.5, Math.min(4.0, state.zoomScale));
+    if (Math.abs(state.zoomScale - 1.0) < 0.02 && Math.abs(state.panX) < 2 && Math.abs(state.panY) < 2) {
       dom.canvas.style.transform = 'none';
     } else {
       dom.canvas.style.transform = `translate3d(${state.panX}px, ${state.panY}px, 0) scale(${state.zoomScale})`;
+    }
+    if (dom.btnZoomReset) {
+      dom.btnZoomReset.textContent = Math.round(state.zoomScale * 10) / 10 + 'x';
     }
   }
 
@@ -161,7 +189,137 @@
     state.panX = 0;
     state.panY = 0;
     applyCanvasTransform();
+    if (dom.btnZoomReset) dom.btnZoomReset.textContent = '1:1';
   }
+
+  dom.btnZoomIn.addEventListener('click', () => {
+    state.zoomScale = Math.min(4.0, state.zoomScale + 0.25);
+    applyCanvasTransform();
+  });
+
+  dom.btnZoomOut.addEventListener('click', () => {
+    state.zoomScale = Math.max(0.5, state.zoomScale - 0.25);
+    applyCanvasTransform();
+  });
+
+  dom.btnZoomReset.addEventListener('click', () => {
+    resetZoom();
+    showToast("Zoom Reset (1.0x)");
+  });
+
+  // FAB Quick Zoom buttons
+  if (dom.fabQuickZoomIn) {
+    dom.fabQuickZoomIn.addEventListener('click', () => {
+      state.zoomScale = Math.min(4.0, state.zoomScale + 0.25);
+      applyCanvasTransform();
+    });
+  }
+  if (dom.fabQuickZoomOut) {
+    dom.fabQuickZoomOut.addEventListener('click', () => {
+      state.zoomScale = Math.max(0.5, state.zoomScale - 0.25);
+      applyCanvasTransform();
+    });
+  }
+
+  // ==============================================================================
+  // COLLAPSIBLE OVERLAY HUD (FULLSCREEN LANDSCAPE MODE)
+  // ==============================================================================
+  function setHudCollapsed(collapsed) {
+    state.hudCollapsed = collapsed;
+    if (collapsed) {
+      dom.appContainer.classList.add('hud-collapsed');
+      dom.fabContainer.classList.remove('hidden');
+    } else {
+      dom.appContainer.classList.remove('hud-collapsed');
+      dom.fabContainer.classList.add('hidden');
+    }
+  }
+
+  dom.btnMinimizeHud.addEventListener('click', () => {
+    setHudCollapsed(true);
+    showToast("Fullscreen Active — Tap ⚡ to restore controls", 2500);
+  });
+
+  dom.btnFabRestore.addEventListener('click', () => {
+    setHudCollapsed(false);
+  });
+
+  // Automatically offer compact mode on landscape rotation
+  window.addEventListener('resize', () => {
+    if (window.innerWidth > window.innerHeight) {
+      // Landscape: keep controls responsive
+    }
+  });
+
+  // ==============================================================================
+  // HIDDEN EASTER EGG #1: TRIPLE-TAP RENI LOGO TO TOGGLE 35 FPS HIGH-FREQUENCY MODE
+  // ==============================================================================
+  dom.easterEggTrigger.addEventListener('click', () => {
+    const now = Date.now();
+    if (now - state.eggLastTapTime < 600) {
+      state.eggTapCount++;
+    } else {
+      state.eggTapCount = 1;
+    }
+    state.eggLastTapTime = now;
+
+    if (state.eggTapCount === 3) {
+      state.eggTapCount = 0;
+      state.highFreqActive = !state.highFreqActive;
+
+      if (state.highFreqActive) {
+        document.body.classList.add('theme-overclock');
+        state.fps = 35;
+        dom.fpsSlider.value = 35;
+        dom.fpsLabel.textContent = "35 FPS";
+        sendStreamConfig({ fps: 35 });
+        showToast("⚡ High-Frequency Stream Active (35 FPS)");
+      } else {
+        document.body.classList.remove('theme-overclock');
+        state.fps = 20;
+        dom.fpsSlider.value = 20;
+        dom.fpsLabel.textContent = "20 FPS";
+        sendStreamConfig({ fps: 20 });
+        showToast("Standard Stream Mode (20 FPS)");
+      }
+    }
+  });
+
+  // ==============================================================================
+  // ONBOARDING: PWA INSTALL & BIOMETRICS PROMPTS
+  // ==============================================================================
+  window.addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault();
+    state.deferredPwaPrompt = e;
+    dom.pwaBanner.classList.remove('hidden');
+  });
+
+  dom.btnPwaInstall.addEventListener('click', async () => {
+    if (state.deferredPwaPrompt) {
+      state.deferredPwaPrompt.prompt();
+      const choice = await state.deferredPwaPrompt.userChoice;
+      state.deferredPwaPrompt = null;
+      dom.pwaBanner.classList.add('hidden');
+    }
+  });
+
+  dom.btnPwaDismiss.addEventListener('click', () => {
+    dom.pwaBanner.classList.add('hidden');
+  });
+
+  // HTTP Biometrics Flag Guide
+  dom.btnOpenHttpGuide.addEventListener('click', () => {
+    dom.httpGuideModal.classList.remove('hidden');
+  });
+  dom.btnCloseHttpGuide.addEventListener('click', () => dom.httpGuideModal.classList.add('hidden'));
+  dom.btnCloseHttpGuideOk.addEventListener('click', () => dom.httpGuideModal.classList.add('hidden'));
+
+  dom.btnCopyFlagsUrl.addEventListener('click', () => {
+    const textToCopy = `chrome://flags/#unsafely-treat-insecure-origin-as-secure\nAdd origin: ${window.location.origin}`;
+    navigator.clipboard.writeText(textToCopy).then(() => {
+      showToast("Flag & Origin Copied to Clipboard!");
+    });
+  });
 
   // ==============================================================================
   // AUTHENTICATION & PIN KEYPAD
@@ -180,7 +338,7 @@
   }
 
   async function submitMasterPin() {
-    dom.authFeedback.textContent = "VERIFYING NITRO CORE KEY...";
+    dom.authFeedback.textContent = "VERIFYING KEY...";
     try {
       const res = await fetch('/api/auth/login-pin', {
         method: 'POST',
@@ -194,11 +352,16 @@
         localStorage.setItem('reni_jwt_token', data.token);
         dom.authFeedback.textContent = "";
         dom.authOverlay.classList.add('hidden');
-        showToast("Access Granted: Nitro Core Connected");
+        showToast("Connected: Remote Session Active");
         
         if (data.must_change_pin) {
           dom.changePinModal.classList.remove('hidden');
           showToast("Notice: Default Master PIN active. Please change PIN.", 5000);
+        } else if (!data.has_biometrics && window.PublicKeyCredential) {
+          // First-time biometric onboarding prompt
+          setTimeout(() => {
+            dom.firstBioModal.classList.remove('hidden');
+          }, 800);
         }
 
         initializeSession();
@@ -217,7 +380,6 @@
     updatePinDisplay();
   }
 
-  // Keypad event listeners
   document.querySelectorAll('.keypad-btn[data-val]').forEach(btn => {
     btn.addEventListener('click', () => {
       if (state.enteredPin.length < 6) {
@@ -267,13 +429,12 @@
 
   async function loginWithBiometrics() {
     if (!window.PublicKeyCredential) {
-      showToast("WebAuthn not supported on this browser/context");
+      showToast("Biometrics not available on this browser/context");
       return;
     }
 
     try {
       dom.authFeedback.textContent = "Requesting biometric challenge...";
-      // Use POST method matching server expectation
       const optRes = await fetch('/api/auth/webauthn/login-options', { method: 'POST' });
       if (!optRes.ok) {
         const err = await optRes.json();
@@ -328,7 +489,7 @@
 
   async function registerBiometrics() {
     if (!window.PublicKeyCredential) {
-      showToast("Biometrics not supported on this device/connection");
+      showToast("Biometrics not available on this device/connection");
       return;
     }
 
@@ -367,6 +528,7 @@
 
       if (verifyRes.ok && result.success) {
         showToast("Phone Biometric Passkey Registered Successfully!");
+        dom.firstBioModal.classList.add('hidden');
       } else {
         showToast(result.detail || "Registration Failed");
       }
@@ -376,45 +538,12 @@
   }
 
   dom.btnRegisterPasskey.addEventListener('click', registerBiometrics);
+  dom.btnAcceptBio.addEventListener('click', registerBiometrics);
+  dom.btnSkipBio.addEventListener('click', () => dom.firstBioModal.classList.add('hidden'));
+  dom.btnDismissBio.addEventListener('click', () => dom.firstBioModal.classList.add('hidden'));
 
   // ==============================================================================
-  // EASTER EGG #2: "N2O OVERCLOCK" MODE (TAP [N2O] 3 TIMES)
-  // ==============================================================================
-  dom.n2oBadge.addEventListener('click', () => {
-    const now = Date.now();
-    if (now - state.n2oLastTapTime < 600) {
-      state.n2oTapCount++;
-    } else {
-      state.n2oTapCount = 1;
-    }
-    state.n2oLastTapTime = now;
-
-    if (state.n2oTapCount === 3) {
-      state.n2oTapCount = 0;
-      state.overclockActive = !state.overclockActive;
-      
-      if (state.overclockActive) {
-        document.body.classList.add('theme-overclock');
-        dom.n2oBadge.classList.add('overclock-active');
-        state.fps = 35;
-        dom.fpsSlider.value = 35;
-        dom.fpsLabel.textContent = "35 FPS (N2O)";
-        sendStreamConfig({ fps: 35 });
-        showToast("N2O Injected: Maximum Telemetry Engaged (35 FPS)");
-      } else {
-        document.body.classList.remove('theme-overclock');
-        dom.n2oBadge.classList.remove('overclock-active');
-        state.fps = 20;
-        dom.fpsSlider.value = 20;
-        dom.fpsLabel.textContent = "20 FPS";
-        sendStreamConfig({ fps: 20 });
-        showToast("N2O Standard Mode Restored (20 FPS)");
-      }
-    }
-  });
-
-  // ==============================================================================
-  // EASTER EGG #3: NITRO SENSE TELEMETRY HUD (psutil)
+  // TELEMETRY POLLING (psutil)
   // ==============================================================================
   async function fetchTelemetry() {
     if (!state.token) return;
@@ -428,35 +557,20 @@
 
       const data = await res.json();
       
-      // Update CPU
       const cpu = Math.round(data.cpu.percent);
       dom.cpuFill.style.width = `${cpu}%`;
       dom.cpuVal.textContent = `${cpu}%`;
 
-      // Dynamic gauge warning colors
-      if (cpu > 85) {
-        dom.cpuFill.style.background = '#FF0033';
-      } else if (state.overclockActive) {
-        dom.cpuFill.style.background = '#00F0FF';
-      } else {
-        dom.cpuFill.style.background = '#FF0033';
-      }
-
-      // Update RAM
       const ram = Math.round(data.memory.percent);
       dom.ramFill.style.width = `${ram}%`;
       dom.ramVal.textContent = `${ram}%`;
 
-      // Update Battery
       const bat = data.battery;
       dom.batteryVal.textContent = `${bat.percent}%`;
       dom.batteryIcon.textContent = bat.plugged ? '⚡' : '🔋';
       
-      // Keep awake sync
       dom.toggleKeepawake.checked = !!data.keep_awake;
-    } catch (err) {
-      // Telemetry request failed
-    }
+    } catch (err) {}
   }
 
   function startTelemetryPolling() {
@@ -487,7 +601,7 @@
 
     state.streamSocket.onopen = () => {
       dom.connectionStatus.classList.remove('disconnected');
-      dom.streamStatusText.textContent = "SYNCHRONIZING NITRO DESKTOP...";
+      dom.streamStatusText.textContent = "SYNCHRONIZING DESKTOP...";
       sendStreamConfig({
         fps: state.fps,
         scale: state.scale,
@@ -496,12 +610,11 @@
     };
 
     state.streamSocket.onmessage = async (event) => {
-      if (typeof event.data === 'string') return; // Config or error message
+      if (typeof event.data === 'string') return;
 
       try {
         const imageBitmap = await createImageBitmap(event.data);
         
-        // Auto-scale canvas resolution to match source monitor aspect
         if (dom.canvas.width !== imageBitmap.width || dom.canvas.height !== imageBitmap.height) {
           dom.canvas.width = imageBitmap.width;
           dom.canvas.height = imageBitmap.height;
@@ -512,13 +625,10 @@
         dom.ctx.drawImage(imageBitmap, 0, 0);
         imageBitmap.close();
 
-        // Dismiss loading overlay on first rendered frame
         if (!dom.streamOverlay.classList.contains('hidden')) {
           dom.streamOverlay.classList.add('hidden');
         }
-      } catch (err) {
-        // Frame decode error
-      }
+      } catch (err) {}
     };
 
     state.streamSocket.onclose = () => {
@@ -552,16 +662,12 @@
     const wsUrl = `${proto}//${location.host}/ws/control?token=${encodeURIComponent(state.token)}`;
     state.controlSocket = new WebSocket(wsUrl);
 
-    state.controlSocket.onopen = () => {
-      // Control channel ready
-    };
-
     state.controlSocket.onclose = () => {
       setTimeout(initControlWebSocket, 2000);
     };
   }
 
-  // Throttled Movement Pipeline: sends at most once every ~16ms (~60Hz)
+  // Movement Throttling (Sends at most once every ~16ms to avoid WebSocket flood)
   let moveThrottleTimer = null;
   let pendingRelDx = 0;
   let pendingRelDy = 0;
@@ -625,11 +731,12 @@
   let twoFingerStartY = 0;
   let hasMovedSignificantly = false;
 
-  // Pinch-to-zoom tracking variables
+  // Universal Pinch-to-zoom tracking (0.5x to 4.0x in BOTH modes)
   let initialPinchDist = 0;
   let initialZoomScale = 1.0;
   let initialMidpoint = { x: 0, y: 0 };
   let initialPan = { x: 0, y: 0 };
+  let isPinching = false;
 
   dom.viewportWrapper.addEventListener('touchstart', (e) => {
     touchStartTime = Date.now();
@@ -640,32 +747,35 @@
       touchStartPos = { x: touch.clientX, y: touch.clientY };
       lastTouchPos = { x: touch.clientX, y: touch.clientY };
       isTwoFingerGesture = false;
+      isPinching = false;
 
       if (state.inputMode === 'trackpad') {
-        // Double-tap-to-drag detection
         const timeSinceLastTap = touchStartTime - lastTapTime;
         if (timeSinceLastTap < 280) {
           isDragging = true;
           flushThrottledMoves();
-          sendControl({ type: "mouse_down", button: "left" });
+          sendControl({
+            type: "mouse_down",
+            button: "left",
+            modifiers: Array.from(state.stickyModifiers)
+          });
         }
       }
     } else if (e.touches.length === 2) {
       isTwoFingerGesture = true;
+      isPinching = false;
       twoFingerStartY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
 
-      if (state.inputMode === 'direct') {
-        initialPinchDist = Math.hypot(
-          e.touches[0].clientX - e.touches[1].clientX,
-          e.touches[0].clientY - e.touches[1].clientY
-        );
-        initialZoomScale = state.zoomScale;
-        initialMidpoint = {
-          x: (e.touches[0].clientX + e.touches[1].clientX) / 2,
-          y: (e.touches[0].clientY + e.touches[1].clientY) / 2
-        };
-        initialPan = { x: state.panX, y: state.panY };
-      }
+      initialPinchDist = Math.hypot(
+        e.touches[0].clientX - e.touches[1].clientX,
+        e.touches[0].clientY - e.touches[1].clientY
+      );
+      initialZoomScale = state.zoomScale;
+      initialMidpoint = {
+        x: (e.touches[0].clientX + e.touches[1].clientX) / 2,
+        y: (e.touches[0].clientY + e.touches[1].clientY) / 2
+      };
+      initialPan = { x: state.panX, y: state.panY };
     }
   }, { passive: false });
 
@@ -685,7 +795,6 @@
       if (state.inputMode === 'trackpad') {
         queueMouseMoveRel(rawDx, rawDy);
       } else {
-        // Direct Touch: compute coordinates taking current canvas scale/pan into account
         const rect = dom.canvas.getBoundingClientRect();
         if (rect.width > 0 && rect.height > 0) {
           const normX = Math.max(0, Math.min(1, (touch.clientX - rect.left) / rect.width));
@@ -698,14 +807,17 @@
     } else if (e.touches.length === 2 && isTwoFingerGesture) {
       hasMovedSignificantly = true;
 
-      if (state.inputMode === 'direct') {
-        // Pinch-to-zoom calculation
-        const curDist = Math.hypot(
-          e.touches[0].clientX - e.touches[1].clientX,
-          e.touches[0].clientY - e.touches[1].clientY
-        );
+      const curDist = Math.hypot(
+        e.touches[0].clientX - e.touches[1].clientX,
+        e.touches[0].clientY - e.touches[1].clientY
+      );
+      const distDelta = Math.abs(curDist - initialPinchDist);
+
+      // If finger distance changes by > 12px, activate Universal Pinch-to-Zoom
+      if (distDelta > 12 || isPinching) {
+        isPinching = true;
         const scaleRatio = curDist / (initialPinchDist || 1);
-        const newScale = Math.max(1.0, Math.min(4.0, initialZoomScale * scaleRatio));
+        const newScale = Math.max(0.5, Math.min(4.0, initialZoomScale * scaleRatio));
         
         const curMidpoint = {
           x: (e.touches[0].clientX + e.touches[1].clientX) / 2,
@@ -716,8 +828,8 @@
         state.panX = initialPan.x + (curMidpoint.x - initialMidpoint.x);
         state.panY = initialPan.y + (curMidpoint.y - initialMidpoint.y);
         applyCanvasTransform();
-      } else {
-        // Trackpad Two-Finger Scroll
+      } else if (!isPinching) {
+        // Parallel two-finger vertical drag: mouse wheel scroll
         const curY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
         const deltaY = curY - twoFingerStartY;
         if (Math.abs(deltaY) > 8) {
@@ -731,38 +843,44 @@
 
   dom.viewportWrapper.addEventListener('touchend', (e) => {
     const duration = Date.now() - touchStartTime;
-
-    // Flush any pending move messages before click actions
     flushThrottledMoves();
 
     if (isDragging) {
       isDragging = false;
-      sendControl({ type: "mouse_up", button: "left" });
+      sendControl({
+        type: "mouse_up",
+        button: "left",
+        modifiers: Array.from(state.stickyModifiers)
+      });
       lastTapTime = 0;
       return;
     }
 
     if (isTwoFingerGesture) {
-      if (!hasMovedSignificantly && duration < 300 && state.inputMode === 'trackpad') {
-        // Two-Finger Single Tap: Right Click
-        sendControl({ type: "mouse_click", button: "right" });
+      if (!hasMovedSignificantly && !isPinching && duration < 300) {
+        // Two-Finger Tap: Right Click with scoped modifiers
+        sendControl({
+          type: "mouse_click",
+          button: "right",
+          modifiers: Array.from(state.stickyModifiers)
+        });
       }
       isTwoFingerGesture = false;
+      isPinching = false;
       return;
     }
 
     if (!hasMovedSignificantly && duration < 250) {
-      // Direct mode double-tap to reset zoom
-      if (state.inputMode === 'direct') {
-        const timeSinceLastTap = Date.now() - lastTapTime;
-        if (timeSinceLastTap < 280 && state.zoomScale > 1.05) {
-          resetZoom();
-          showToast("Zoom Reset (1.0x)");
-          lastTapTime = 0;
-          return;
-        }
+      // Double tap reset zoom if zoomed in/out
+      const timeSinceLastTap = Date.now() - lastTapTime;
+      if (timeSinceLastTap < 280 && Math.abs(state.zoomScale - 1.0) > 0.05) {
+        resetZoom();
+        showToast("Zoom Reset (1.0x)");
+        lastTapTime = 0;
+        return;
+      }
 
-        // Direct Touch: Tap maps directly to desktop coordinate
+      if (state.inputMode === 'direct') {
         const rect = dom.canvas.getBoundingClientRect();
         if (rect.width > 0 && rect.height > 0) {
           const normX = Math.max(0, Math.min(1, (touchStartPos.x - rect.left) / rect.width));
@@ -771,41 +889,61 @@
         }
       }
 
-      // Single Tap: Left Click
-      sendControl({ type: "mouse_click", button: "left" });
+      // Single Tap: Left Click with scoped modifiers
+      sendControl({
+        type: "mouse_click",
+        button: "left",
+        modifiers: Array.from(state.stickyModifiers)
+      });
       lastTapTime = Date.now();
     }
   });
 
-  // Toggle Input Mode (Trackpad vs Direct)
-  dom.btnModeToggle.addEventListener('click', () => {
+  // Toggle Input Mode (Touchpad vs Direct Touch)
+  function toggleInputMode() {
     if (state.inputMode === 'trackpad') {
       state.inputMode = 'direct';
       dom.modeIcon.textContent = '👆';
-      resetZoom();
-      showToast("Input Mode: Direct Touch & Pinch-Zoom");
+      dom.modeText.textContent = 'Touch';
+      if (dom.fabQuickMode) dom.fabQuickMode.textContent = '👆';
+      showToast("Input Mode: Direct Touch");
     } else {
       state.inputMode = 'trackpad';
       dom.modeIcon.textContent = '🖱️';
-      resetZoom();
-      showToast("Input Mode: Trackpad Precision");
+      dom.modeText.textContent = 'Touchpad';
+      if (dom.fabQuickMode) dom.fabQuickMode.textContent = '🖱️';
+      showToast("Input Mode: Trackpad");
     }
-  });
+  }
+
+  dom.btnModeToggle.addEventListener('click', toggleInputMode);
+  if (dom.fabQuickMode) dom.fabQuickMode.addEventListener('click', toggleInputMode);
 
   // ==============================================================================
-  // MOBILE KEYBOARD & DOCK SHORTCUT DECK
+  // SCOPED MODIFIERS & SHORTCUT DOCK (DOES NOT AFFECT PHYSICAL LAPTOP KEYBOARD)
   // ==============================================================================
   dom.btnKeyboardTrigger.addEventListener('click', () => {
     dom.mobileKeyCapture.focus();
     dom.mobileKeyCapture.click();
-    showToast("Mobile Keyboard Active");
+    showToast("Keyboard Active");
   });
+
+  if (dom.fabQuickKey) {
+    dom.fabQuickKey.addEventListener('click', () => {
+      dom.mobileKeyCapture.focus();
+      dom.mobileKeyCapture.click();
+    });
+  }
 
   dom.mobileKeyCapture.addEventListener('keydown', (e) => {
     if (e.key === 'Backspace') {
       sendControl({ type: "key_backspace" });
     } else if (e.key === 'Enter') {
-      sendControl({ type: "key_tap", key: "enter" });
+      sendControl({
+        type: "key_tap",
+        key: "enter",
+        modifiers: Array.from(state.stickyModifiers)
+      });
     }
   });
 
@@ -816,27 +954,31 @@
     dom.mobileKeyCapture.value = '';
   });
 
-  // Sticky Modifiers Toggle (Ctrl, Alt, Shift)
+  // Sticky Modifiers (Scoped to remote commands only)
   document.querySelectorAll('.dock-btn.mod-toggle').forEach(btn => {
     btn.addEventListener('click', () => {
       const key = btn.getAttribute('data-key');
       if (state.stickyModifiers.has(key)) {
         state.stickyModifiers.delete(key);
         btn.classList.remove('active');
-        sendControl({ type: "key_up", key });
+        showToast(`${key.toUpperCase()} Released`);
       } else {
         state.stickyModifiers.add(key);
         btn.classList.add('active');
-        sendControl({ type: "key_down", key });
+        showToast(`${key.toUpperCase()} Latched (Applies to next remote action)`);
       }
     });
   });
 
-  // Shortcut Buttons
+  // Shortcut & Task View Buttons
   document.querySelectorAll('.dock-btn[data-key]:not(.mod-toggle)').forEach(btn => {
     btn.addEventListener('click', () => {
       const key = btn.getAttribute('data-key');
-      sendControl({ type: "key_tap", key });
+      sendControl({
+        type: "key_tap",
+        key,
+        modifiers: Array.from(state.stickyModifiers)
+      });
     });
   });
 
@@ -844,7 +986,7 @@
     btn.addEventListener('click', () => {
       const keys = btn.getAttribute('data-combo').split(',');
       sendControl({ type: "key_combo", keys });
-      showToast(`Macro Triggered: ${btn.textContent.trim()}`);
+      showToast(`Macro: ${btn.textContent.trim()}`);
     });
   });
 
@@ -865,11 +1007,7 @@
       try {
         const msg = JSON.parse(event.data);
         const span = document.createElement('span');
-        if (msg.type === 'stderr') {
-          span.className = 'term-stderr';
-        } else {
-          span.className = 'term-stdout';
-        }
+        span.className = msg.type === 'stderr' ? 'term-stderr' : 'term-stdout';
         span.textContent = msg.data;
         dom.terminalOutput.appendChild(span);
         dom.terminalOutput.scrollTop = dom.terminalOutput.scrollHeight;
@@ -906,9 +1044,7 @@
   });
 
   dom.terminalInput.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') {
-      dom.btnTermSend.click();
-    }
+    if (e.key === 'Enter') dom.btnTermSend.click();
   });
 
   dom.btnTermClear.addEventListener('click', () => {
@@ -921,11 +1057,9 @@
     }
   });
 
-  // Macro chips
   document.querySelectorAll('.macro-chip[data-cmd]').forEach(chip => {
     chip.addEventListener('click', () => {
-      const cmd = chip.getAttribute('data-cmd');
-      sendTerminalCommand(cmd);
+      sendTerminalCommand(chip.getAttribute('data-cmd'));
     });
   });
 
@@ -940,7 +1074,6 @@
     dom.settingsDrawer.classList.remove('open');
   });
 
-  // Privacy Blackout Toggle
   dom.toggleBlackout.addEventListener('change', async () => {
     try {
       const res = await fetch('/api/power/blackout', {
@@ -958,7 +1091,6 @@
     }
   });
 
-  // Keep-Awake Toggle
   dom.toggleKeepawake.addEventListener('change', async () => {
     try {
       const res = await fetch('/api/power/keep-awake', {
@@ -976,11 +1108,10 @@
     }
   });
 
-  // Power Action Buttons
   document.querySelectorAll('.power-btn[data-action]').forEach(btn => {
     btn.addEventListener('click', async () => {
       const action = btn.getAttribute('data-action');
-      if (confirm(`Execute host system action: ${action.toUpperCase()}?`)) {
+      if (confirm(`Execute host action: ${action.toUpperCase()}?`)) {
         try {
           const res = await fetch('/api/power/action', {
             method: 'POST',
@@ -999,7 +1130,6 @@
     });
   });
 
-  // Stream Sliders
   dom.scaleSlider.addEventListener('input', (e) => {
     const val = parseFloat(e.target.value);
     dom.scaleLabel.textContent = `${Math.round(val * 100)}%`;
@@ -1027,7 +1157,6 @@
     state.trackpadSensitivity = val;
   });
 
-  // Wake-on-LAN Broadcast
   dom.btnTriggerWol.addEventListener('click', async () => {
     const mac = dom.wolMacInput.value.trim();
     try {
@@ -1040,9 +1169,9 @@
         body: JSON.stringify({ mac })
       });
       const data = await res.json();
-      showToast(data.success ? "Magic Packet Broadcasted" : "WoL Broadcast Failed");
+      showToast(data.success ? "Magic Packet Broadcasted" : "WoL Failed");
     } catch (err) {
-      showToast("Error transmitting Magic Packet");
+      showToast("Error transmitting WoL");
     }
   });
 
@@ -1061,7 +1190,7 @@
       const res = await fetch(`/api/clipboard?token=${encodeURIComponent(state.token)}`);
       const data = await res.json();
       dom.clipboardTextarea.value = data.text || '';
-      showToast("Pulled from Host Clipboard");
+      showToast("Pulled from Laptop Clipboard");
     } catch (err) {
       showToast("Failed to read clipboard");
     }
@@ -1079,7 +1208,7 @@
         body: JSON.stringify({ text })
       });
       const data = await res.json();
-      showToast("Pushed to Host Clipboard");
+      showToast("Pushed to Laptop Clipboard");
     } catch (err) {
       showToast("Failed to write clipboard");
     }
@@ -1116,7 +1245,7 @@
         state.token = data.token;
         localStorage.setItem('reni_jwt_token', data.token);
         dom.changePinModal.classList.add('hidden');
-        showToast("Master PIN Successfully Updated!");
+        showToast("Master PIN Updated Successfully!");
       } else {
         showToast(data.detail || "PIN update failed");
       }
@@ -1160,7 +1289,7 @@
     dom.authOverlay.classList.remove('hidden');
   }
 
-  // PWA Service Worker Registration
+  // Service Worker Registration
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
       navigator.serviceWorker.register('/sw.js').catch(() => {});

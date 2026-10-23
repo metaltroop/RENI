@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
 ================================================================================
-  R.E.N.I.S. // REMOTE ACCESS NITRO - HOST SERVER
-  NITRO HIGH-PERFORMANCE DESKTOP & ADMINISTRATIVE ENGINE
+  R.E.N.I.S. // REMOTE ACCESS SERVER
+  High-Performance Remote Desktop, Dashboard, & Administrative Control
   FastAPI + MSS + PyAutoGUI + WebAuthn / Master PIN + PowerShell Terminal
 ================================================================================
 """
@@ -11,7 +11,7 @@ import os
 import sys
 from pathlib import Path
 
-# Ensure SERVER_DIR is in sys.path so local imports (e.g. renis_wol_trigger) always resolve
+# Ensure SERVER_DIR is in sys.path
 SERVER_DIR = Path(__file__).resolve().parent
 if str(SERVER_DIR) not in sys.path:
     sys.path.insert(0, str(SERVER_DIR))
@@ -26,7 +26,7 @@ import secrets
 import asyncio
 import socket
 import ctypes
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Set
 
 # Try loading environment variables
 try:
@@ -54,25 +54,24 @@ from PIL import Image, ImageDraw
 import psutil
 import jwt
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends, Query, status, Request
-from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
+from fastapi.responses import HTMLResponse, FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 
 # ==============================================================================
-# EASTER EGG #1: NITRO BOOT BANNER
+# CLEAN PROFESSIONAL ASCII BANNER
 # ==============================================================================
-NITRO_TERMINAL_BANNER = r"""
-  ██████╗     ███████╗    ███╗   ██╗    ██╗    ███████╗
-  ██╔══██╗    ██╔════╝    ████╗  ██║    ██║    ██╔════╝
-  ██████╔╝    █████╗      ██╔██╗ ██║    ██║    ███████╗
-  ██╔══██╗    ██╔══╝      ██║╚██╗██║    ██║    ╚════██║
-  ██║  ██║    ███████╗    ██║ ╚████║    ██║    ███████║
-  ╚═╝  ╚═╝    ╚══════╝    ╚═╝  ╚═══╝    ╚═╝    ╚══════╝
-  ══════════════════════════════════════════════════════════
-  >> R.E.N.I.S. // ENGINE ONLINE — NITRO CORE ACTIVE <<
-  >> REMOTE DESKTOP & ELEVATED ADMIN CONTROL SERVER <<
-  ══════════════════════════════════════════════════════════
+RENI_BANNER = r"""
+  ██████╗     ███████╗    ███╗   ██╗    ██╗
+  ██╔══██╗    ██╔════╝    ████╗  ██║    ██║
+  ██████╔╝    █████╗      ██╔██╗ ██║    ██║
+  ██╔══██╗    ██╔══╝      ██║╚██╗██║    ██║
+  ██║  ██║    ███████╗    ██║ ╚████║    ██║
+  ╚═╝  ╚═╝    ╚══════╝    ╚═╝  ╚═══╝    ╚═╝
+  ══════════════════════════════════════════════
+  >> R.E.N.I. // REMOTE SYSTEM CONTROL SERVER <<
+  ══════════════════════════════════════════════
 """
 
 # ==============================================================================
@@ -81,6 +80,7 @@ NITRO_TERMINAL_BANNER = r"""
 REPO_ROOT = SERVER_DIR.parent
 CLIENT_DIR = REPO_ROOT / "RENIC"
 AUTH_FILE = SERVER_DIR / "renis_auth.json"
+DASHBOARD_FILE = SERVER_DIR / "dashboard.html"
 
 HOST = os.getenv("RENIS_HOST", "0.0.0.0")
 PORT = int(os.getenv("RENIS_PORT", "8765"))
@@ -99,6 +99,44 @@ MONITOR_ON = -1
 ES_CONTINUOUS = 0x80000000
 ES_SYSTEM_REQUIRED = 0x00000001
 ES_DISPLAY_REQUIRED = 0x00000002
+
+# Live WebSocket Connection Tracking
+ACTIVE_STREAMS: Set[WebSocket] = set()
+ACTIVE_CONTROLS: Set[WebSocket] = set()
+ACTIVE_TERMINALS: Set[WebSocket] = set()
+
+# ==============================================================================
+# NETWORK & DISCOVERY HELPERS (LAN & TAILSCALE AUTO-DETECTION)
+# ==============================================================================
+def get_discovered_ips() -> List[str]:
+    """Returns list of usable LAN and Tailscale IPs, prioritizing Wi-Fi/Ethernet and Tailscale."""
+    lan_ips = []
+    tailscale_ips = []
+    try:
+        nics = psutil.net_if_addrs()
+        for nic_name, addrs in nics.items():
+            for addr in addrs:
+                if addr.family == socket.AF_INET:
+                    ip = addr.address
+                    if ip.startswith("127.") or ip.startswith("169.254."):
+                        continue
+                    if ip.startswith("100."): # Tailscale VPN Range (100.64.0.0/10)
+                        tailscale_ips.append(ip)
+                    else:
+                        lan_ips.append(ip)
+    except Exception:
+        pass
+
+    if not lan_ips:
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("8.8.8.8", 80))
+            lan_ips.append(s.getsockname()[0])
+            s.close()
+        except Exception:
+            pass
+
+    return lan_ips + tailscale_ips
 
 # ==============================================================================
 # UAC ELEVATION CHECK & AUTO-RESTART
@@ -238,9 +276,9 @@ def verify_and_consume_challenge(client_data_b64: Optional[str]) -> bool:
 # FASTAPI APPLICATION SETUP
 # ==============================================================================
 app = FastAPI(
-    title="RENI - Remote Access Nitro Server",
-    description="Secure, zero-cost, self-hosted Remote Desktop & Administrative Engine",
-    version="1.0.0"
+    title="RENI - Remote Access System",
+    description="Secure, self-hosted Remote Desktop & Administrative Engine",
+    version="2.0.0"
 )
 
 app.add_middleware(
@@ -253,6 +291,65 @@ app.add_middleware(
 
 # Global keep-awake state tracker
 KEEP_AWAKE_ACTIVE = False
+
+# ==============================================================================
+# REST API: SERVER MANAGEMENT & DASHBOARD
+# ==============================================================================
+@app.get("/dashboard")
+async def serve_dashboard():
+    """Serves the host control panel dashboard."""
+    if DASHBOARD_FILE.exists():
+        return FileResponse(DASHBOARD_FILE)
+    return HTMLResponse("<h2>RENI - Dashboard file not found</h2>", status_code=404)
+
+@app.get("/api/server/status")
+async def get_server_status():
+    """Returns live server metrics, IP addresses, and active connection counts."""
+    mem = psutil.virtual_memory()
+    ips = get_discovered_ips()
+    return {
+        "active_streams": len(ACTIVE_STREAMS),
+        "active_controls": len(ACTIVE_CONTROLS),
+        "active_terminals": len(ACTIVE_TERMINALS),
+        "cpu_percent": psutil.cpu_percent(),
+        "cpu_count": psutil.cpu_count(logical=True),
+        "ram_percent": mem.percent,
+        "ram_used_gb": round(mem.used / (1024**3), 2),
+        "ram_total_gb": round(mem.total / (1024**3), 2),
+        "discovered_ips": ips,
+        "port": PORT,
+        "has_biometrics": len(AUTH_DATA.get("webauthn_credentials", [])) > 0,
+        "keep_awake": KEEP_AWAKE_ACTIVE
+    }
+
+@app.post("/api/server/kill-sessions")
+async def kill_all_sessions():
+    """Emergency kill-switch: closes all active remote WebSocket connections."""
+    count = 0
+    all_sockets = list(ACTIVE_STREAMS) + list(ACTIVE_CONTROLS) + list(ACTIVE_TERMINALS)
+    for ws in all_sockets:
+        try:
+            await ws.close(code=status.WS_1000_NORMAL_CLOSURE)
+            count += 1
+        except Exception:
+            pass
+    ACTIVE_STREAMS.clear()
+    ACTIVE_CONTROLS.clear()
+    ACTIVE_TERMINALS.clear()
+    return {"success": True, "closed_sessions": count, "message": f"Closed {count} active remote sessions"}
+
+@app.post("/api/server/powercfg-lid")
+async def configure_powercfg_lid():
+    """Configures Windows PowerCFG so closing lid on AC power does not sleep."""
+    if sys.platform == 'win32':
+        try:
+            os.system("powercfg /setacvalueindex SCHEME_CURRENT SUB_BUTTONS LIDACTION 0")
+            os.system("powercfg /change standby-timeout-ac 0")
+            os.system("powercfg /setactive SCHEME_CURRENT")
+            return {"success": True, "message": "PowerCFG updated: Laptop will not sleep on lid close (AC power)"}
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
+    return {"success": False, "message": "Not running on Windows"}
 
 # ==============================================================================
 # REST API: AUTHENTICATION & WEBAUTHN
@@ -272,10 +369,12 @@ async def login_with_pin(payload: Dict[str, str]):
         AUTH_DATA["last_login"] = time.time()
         save_auth_store()
         token = create_jwt_token("master_pin_user")
+        has_biometrics = len(AUTH_DATA.get("webauthn_credentials", [])) > 0
         return {
             "success": True,
             "token": token,
             "must_change_pin": AUTH_DATA.get("must_change_pin", False),
+            "has_biometrics": has_biometrics,
             "message": "Authentication successful"
         }
     else:
@@ -293,7 +392,6 @@ async def change_master_pin(payload: Dict[str, str], request: Request):
     if not new_pin or len(new_pin) < 6:
         raise HTTPException(status_code=400, detail="New PIN must be at least 6 digits")
 
-    # Authorize either via valid JWT or verified old PIN
     authorized = False
     if token and verify_jwt_token(token):
         authorized = True
@@ -326,19 +424,20 @@ async def webauthn_register_options(request: Request):
     for k in [k for k, exp in PENDING_CHALLENGES.items() if now >= exp]:
         del PENDING_CHALLENGES[k]
 
-    challenge = secrets.token_urlsafe(32)
-    PENDING_CHALLENGES[challenge] = now + 300 # 5 min TTL
+    # Canonical unpadded base64url challenge
+    challenge = base64.urlsafe_b64encode(secrets.token_bytes(32)).rstrip(b'=').decode('ascii')
+    PENDING_CHALLENGES[challenge] = now + 300
 
     return {
         "challenge": challenge,
         "rp": {
-            "name": "RENI Nitro Server",
+            "name": "RENI Remote Server",
             "id": request.url.hostname or "localhost"
         },
         "user": {
             "id": secrets.token_hex(16),
-            "name": "nitro_operator",
-            "displayName": "Nitro Mobile Operator"
+            "name": "reni_operator",
+            "displayName": "RENI Mobile Operator"
         },
         "pubKeyCredParams": [
             {"alg": -7, "type": "public-key"},  # ES256
@@ -368,7 +467,7 @@ async def webauthn_register_verify(payload: Dict[str, Any], request: Request):
     if not cred_id or not response_data:
         raise HTTPException(status_code=400, detail="Invalid credential registration payload")
 
-    # Verify and consume the challenge to prevent replay
+    # Verify and consume challenge to prevent replay
     client_data_b64 = response_data.get("clientDataJSON")
     if not verify_and_consume_challenge(client_data_b64):
         raise HTTPException(status_code=400, detail="Invalid, expired, or replayed WebAuthn challenge")
@@ -382,7 +481,7 @@ async def webauthn_register_verify(payload: Dict[str, Any], request: Request):
 
     AUTH_DATA.setdefault("webauthn_credentials", []).append(new_cred)
     save_auth_store()
-    return {"success": True, "message": "Biometric hardware credential registered successfully"}
+    return {"success": True, "message": "Biometric hardware passkey registered successfully"}
 
 # Support BOTH GET and POST to prevent 405 Method Not Allowed
 @app.api_route("/api/auth/webauthn/login-options", methods=["GET", "POST"])
@@ -392,12 +491,12 @@ async def webauthn_login_options(request: Request):
     if not credentials:
         raise HTTPException(status_code=400, detail="No biometrics registered on host. Use Master PIN.")
 
-    # Prune expired challenges
     now = time.time()
     for k in [k for k, exp in PENDING_CHALLENGES.items() if now >= exp]:
         del PENDING_CHALLENGES[k]
 
-    challenge = secrets.token_urlsafe(32)
+    # Canonical unpadded base64url challenge
+    challenge = base64.urlsafe_b64encode(secrets.token_bytes(32)).rstrip(b'=').decode('ascii')
     PENDING_CHALLENGES[challenge] = now + 300
 
     allow_credentials = [
@@ -420,13 +519,11 @@ async def webauthn_login_verify(payload: Dict[str, Any]):
     if not cred_id:
         raise HTTPException(status_code=400, detail="Missing credential ID")
 
-    # Verify and consume challenge to prevent replay/spoofing
     response_data = payload.get("response", {})
     client_data_b64 = response_data.get("clientDataJSON")
     if not verify_and_consume_challenge(client_data_b64):
         raise HTTPException(status_code=400, detail="Invalid, expired, or replayed WebAuthn challenge")
 
-    # Match registered credential
     registered_ids = [c["id"] for c in AUTH_DATA.get("webauthn_credentials", [])]
     if cred_id not in registered_ids:
         raise HTTPException(status_code=401, detail="Unrecognized biometric credential")
@@ -447,12 +544,10 @@ async def get_system_telemetry(token: Optional[str] = Query(None), request: Requ
     if not req_token or not verify_jwt_token(req_token):
         raise HTTPException(status_code=401, detail="Unauthorized")
 
-    # CPU & Memory
     cpu_percent = psutil.cpu_percent(interval=None)
     cpu_freq = psutil.cpu_freq()
     mem = psutil.virtual_memory()
 
-    # Battery
     battery_info = {"percent": 100, "plugged": True, "secsleft": -1}
     try:
         battery = psutil.sensors_battery()
@@ -465,7 +560,6 @@ async def get_system_telemetry(token: Optional[str] = Query(None), request: Requ
     except Exception:
         pass
 
-    # Network counters
     net = psutil.net_io_counters()
 
     return {
@@ -632,8 +726,8 @@ async def websocket_stream(websocket: WebSocket, token: Optional[str] = Query(No
         return
 
     await websocket.accept()
+    ACTIVE_STREAMS.add(websocket)
 
-    # Stream configuration (adjustable dynamically by client)
     config = {
         "fps": 20,
         "scale": 0.75,
@@ -643,7 +737,6 @@ async def websocket_stream(websocket: WebSocket, token: Optional[str] = Query(No
     }
 
     async def incoming_config_listener():
-        """Listens for dynamic stream quality/FPS adjustments from mobile client."""
         try:
             while config["running"]:
                 msg_text = await websocket.receive_text()
@@ -670,6 +763,7 @@ async def websocket_stream(websocket: WebSocket, token: Optional[str] = Query(No
     if not mss:
         await websocket.send_text(json.dumps({"error": "mss library not available"}))
         await websocket.close()
+        ACTIVE_STREAMS.discard(websocket)
         return
 
     try:
@@ -696,19 +790,16 @@ async def websocket_stream(websocket: WebSocket, token: Optional[str] = Query(No
                             draw = ImageDraw.Draw(img)
                             r_outer = 7
                             r_inner = 3
-                            # Nitro Crimson Red outer ring
                             draw.ellipse(
                                 (rel_x - r_outer, rel_y - r_outer, rel_x + r_outer, rel_y + r_outer),
                                 outline=(255, 0, 51),
                                 width=2
                             )
-                            # High-contrast white center dot
                             draw.ellipse(
                                 (rel_x - r_inner, rel_y - r_inner, rel_x + r_inner, rel_y + r_inner),
                                 fill=(255, 255, 255),
                                 outline=(0, 0, 0)
                             )
-                            # Crosshair ticks for enhanced visibility
                             draw.line((rel_x - r_outer - 4, rel_y, rel_x - r_outer + 1, rel_y), fill=(255, 0, 51), width=2)
                             draw.line((rel_x + r_outer - 1, rel_y, rel_x + r_outer + 4, rel_y), fill=(255, 0, 51), width=2)
                             draw.line((rel_x, rel_y - r_outer - 4, rel_x, rel_y - r_outer + 1), fill=(255, 0, 51), width=2)
@@ -723,7 +814,6 @@ async def websocket_stream(websocket: WebSocket, token: Optional[str] = Query(No
                     target_h = int(img.height * scale)
                     img = img.resize((target_w, target_h), Image.Resampling.BILINEAR)
 
-                # Compress to binary memory buffer
                 buf = io.BytesIO()
                 img.save(
                     buf,
@@ -733,10 +823,8 @@ async def websocket_stream(websocket: WebSocket, token: Optional[str] = Query(No
                 )
                 frame_bytes = buf.getvalue()
 
-                # Dispatch binary frame
                 await websocket.send_bytes(frame_bytes)
 
-                # Framerate throttle
                 target_interval = 1.0 / config["fps"]
                 elapsed = time.perf_counter() - start_time
                 sleep_duration = target_interval - elapsed
@@ -750,6 +838,7 @@ async def websocket_stream(websocket: WebSocket, token: Optional[str] = Query(No
     except Exception as e:
         print(f"[!] Stream WebSocket Error: {e}")
     finally:
+        ACTIVE_STREAMS.discard(websocket)
         config["running"] = False
         listener_task.cancel()
 
@@ -761,14 +850,15 @@ async def websocket_control(websocket: WebSocket, token: Optional[str] = Query(N
     """
     Processes real-time mouse tracking, touch gestures, mobile keyboard input,
     and administrative shortcut combinations.
+    Applies modifier keys strictly per-action so laptop physical keyboard is never stuck.
     """
     if not token or not verify_jwt_token(token):
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
 
     await websocket.accept()
+    ACTIVE_CONTROLS.add(websocket)
 
-    # Track screen bounds
     screen_w, screen_h = pyautogui.size() if pyautogui else (1920, 1080)
 
     try:
@@ -780,13 +870,13 @@ async def websocket_control(websocket: WebSocket, token: Optional[str] = Query(N
             if not pyautogui:
                 continue
 
-            # 1. Relative Mouse Movement (Trackpad Mode)
+            # Relative Mouse Movement (Trackpad Mode)
             if action == "mouse_move_rel":
                 dx = float(cmd.get("dx", 0))
                 dy = float(cmd.get("dy", 0))
                 pyautogui.moveRel(dx, dy)
 
-            # 2. Absolute Direct Touch Coordinate Mapping
+            # Absolute Direct Touch Coordinate Mapping
             elif action == "mouse_move_abs":
                 nx = float(cmd.get("x", 0)) # 0.0 to 1.0
                 ny = float(cmd.get("y", 0))
@@ -794,28 +884,40 @@ async def websocket_control(websocket: WebSocket, token: Optional[str] = Query(N
                 target_y = max(0, min(screen_h - 1, int(ny * screen_h)))
                 pyautogui.moveTo(target_x, target_y)
 
-            # 3. Mouse Clicks & Double Clicks
+            # Mouse Clicks with temporary modifiers (never locks Ctrl on laptop)
             elif action == "mouse_click":
                 button = cmd.get("button", "left")
                 is_double = cmd.get("double", False)
+                modifiers = cmd.get("modifiers", [])
                 clicks = 2 if is_double else 1
-                pyautogui.click(button=button, clicks=clicks)
 
-            # 4. Drag & Drop: Mouse Down / Mouse Up
+                for m in modifiers:
+                    pyautogui.keyDown(m.lower())
+                pyautogui.click(button=button, clicks=clicks)
+                for m in modifiers:
+                    pyautogui.keyUp(m.lower())
+
+            # Drag & Drop: Mouse Down / Mouse Up
             elif action == "mouse_down":
                 button = cmd.get("button", "left")
+                modifiers = cmd.get("modifiers", [])
+                for m in modifiers:
+                    pyautogui.keyDown(m.lower())
                 pyautogui.mouseDown(button=button)
 
             elif action == "mouse_up":
                 button = cmd.get("button", "left")
+                modifiers = cmd.get("modifiers", [])
                 pyautogui.mouseUp(button=button)
+                for m in modifiers:
+                    pyautogui.keyUp(m.lower())
 
-            # 5. Two-Finger Wheel Scrolling
+            # Two-Finger Wheel Scrolling
             elif action == "mouse_scroll":
                 dy = int(cmd.get("dy", 0))
                 pyautogui.scroll(dy)
 
-            # 6. Keyboard Simulation & Sticky Modifiers
+            # Keyboard Simulation
             elif action == "key_down":
                 key = cmd.get("key", "").lower()
                 if key:
@@ -828,15 +930,21 @@ async def websocket_control(websocket: WebSocket, token: Optional[str] = Query(N
 
             elif action == "key_tap":
                 key = cmd.get("key", "").lower()
+                modifiers = cmd.get("modifiers", [])
                 if key:
-                    pyautogui.press(key)
+                    if modifiers:
+                        keys = [m.lower() for m in modifiers] + [key]
+                        pyautogui.hotkey(*keys)
+                    else:
+                        pyautogui.press(key)
 
+            # Key Combos (e.g. ['win', 'tab'] Task View, ['alt', 'tab'], ['ctrl', 'shift', 'esc'])
             elif action == "key_combo":
                 keys = cmd.get("keys", [])
                 if keys:
                     pyautogui.hotkey(*[k.lower() for k in keys])
 
-            # 7. Mobile Keyboard Text Forwarding
+            # Mobile Keyboard Text Forwarding
             elif action == "type_text":
                 text = cmd.get("text", "")
                 if text:
@@ -849,6 +957,8 @@ async def websocket_control(websocket: WebSocket, token: Optional[str] = Query(N
         pass
     except Exception as e:
         print(f"[!] Control WebSocket Exception: {e}")
+    finally:
+        ACTIVE_CONTROLS.discard(websocket)
 
 # ==============================================================================
 # WEBSOCKET 3: ELEVATED ADMIN POWERSHELL TERMINAL (/ws/terminal)
@@ -865,8 +975,8 @@ async def websocket_terminal(websocket: WebSocket, token: Optional[str] = Query(
         return
 
     await websocket.accept()
+    ACTIVE_TERMINALS.add(websocket)
 
-    # Launch persistent PowerShell process
     cmd = ["powershell.exe", "-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", "-"]
     try:
         proc = await asyncio.create_subprocess_exec(
@@ -876,19 +986,18 @@ async def websocket_terminal(websocket: WebSocket, token: Optional[str] = Query(
             stderr=asyncio.subprocess.PIPE
         )
         
-        # Configure PowerShell output encoding to UTF-8
         if proc.stdin:
             proc.stdin.write(b"[Console]::OutputEncoding = [System.Text.Encoding]::UTF8\r\n")
             await proc.stdin.drain()
     except Exception as e:
         await websocket.send_text(json.dumps({"type": "error", "data": f"Failed to spawn shell: {e}\r\n"}))
         await websocket.close()
+        ACTIVE_TERMINALS.discard(websocket)
         return
 
     terminal_active = True
 
     async def read_stream(stream, stream_name: str):
-        """Reads lines from stdout/stderr in UTF-8 and dispatches over WebSocket."""
         try:
             while terminal_active:
                 line = await stream.readline()
@@ -905,7 +1014,6 @@ async def websocket_terminal(websocket: WebSocket, token: Optional[str] = Query(
     stdout_task = asyncio.create_task(read_stream(proc.stdout, "stdout"))
     stderr_task = asyncio.create_task(read_stream(proc.stderr, "stderr"))
 
-    # Initial prompt greeting
     await websocket.send_text(json.dumps({
         "type": "stdout",
         "data": "Windows PowerShell (RENI Admin Shell - High Privilege)\r\nEnter commands or use quick installer scripts:\r\nPS " + str(Path.cwd()) + "> "
@@ -924,7 +1032,6 @@ async def websocket_terminal(websocket: WebSocket, token: Optional[str] = Query(
                     await proc.stdin.drain()
 
             elif msg_type == "interrupt":
-                # Send Ctrl+C or kill command
                 if sys.platform == 'win32' and proc.pid:
                     try:
                         import signal
@@ -937,6 +1044,7 @@ async def websocket_terminal(websocket: WebSocket, token: Optional[str] = Query(
     except Exception as e:
         print(f"[!] Terminal WebSocket error: {e}")
     finally:
+        ACTIVE_TERMINALS.discard(websocket)
         terminal_active = False
         stdout_task.cancel()
         stderr_task.cancel()
@@ -947,14 +1055,24 @@ async def websocket_terminal(websocket: WebSocket, token: Optional[str] = Query(
             pass
 
 # ==============================================================================
-# CLIENT STATIC FILES & PWA ROUTING (PATH-TRAVERSAL HARDENED)
+# CLIENT STATIC FILES & PWA ROUTING (AUTO-REDIRECT LOCALHOST TO DASHBOARD)
 # ==============================================================================
 if CLIENT_DIR.exists():
     app.mount("/static", StaticFiles(directory=str(CLIENT_DIR)), name="static")
 
 @app.get("/")
-async def serve_index():
-    """Serves the main PWA HTML file."""
+async def serve_index(request: Request):
+    """
+    Serves the main PWA HTML file for remote users, or auto-redirects localhost
+    to the host dashboard unless ?client=1 is requested.
+    """
+    host_ip = request.client.host if request.client else ""
+    hostname = request.url.hostname or ""
+
+    if hostname in ["localhost", "127.0.0.1", "::1"] or host_ip in ["127.0.0.1", "::1"]:
+        if "client" not in request.query_params:
+            return RedirectResponse(url="/dashboard")
+
     index_file = CLIENT_DIR / "index.html"
     if index_file.exists():
         return FileResponse(index_file)
@@ -966,7 +1084,6 @@ async def serve_root_pwa_files(filename: str):
     target_file = (CLIENT_DIR / filename).resolve()
     client_dir_resolved = CLIENT_DIR.resolve()
 
-    # Prevent path traversal outside CLIENT_DIR
     if not str(target_file).startswith(str(client_dir_resolved)):
         raise HTTPException(status_code=403, detail="Forbidden")
 
@@ -987,27 +1104,16 @@ async def serve_root_pwa_files(filename: str):
 # MAIN ENTRYPOINT
 # ==============================================================================
 def main():
-    # Print Nitro Banner
-    print(NITRO_TERMINAL_BANNER)
-    
-    # Check Admin Elevation
+    print(RENI_BANNER)
     check_and_elevate()
 
-    # Discover host LAN IP for easy mobile browser connection
-    lan_ips = []
-    try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.connect(("8.8.8.8", 80))
-        primary_ip = s.getsockname()[0]
-        s.close()
-        lan_ips.append(primary_ip)
-    except Exception:
-        pass
+    discovered_ips = get_discovered_ips()
 
     print(f"[*] Host Machine: {socket.gethostname()} (Windows NT Elevated)")
-    print(f"[*] RENIS Engine running on http://{HOST}:{PORT}")
-    if lan_ips:
-        print(f"[+] Connect your phone browser to: http://{lan_ips[0]}:{PORT}")
+    print(f"[*] Host Dashboard: http://localhost:{PORT}/dashboard")
+    for ip in discovered_ips:
+        label = "Tailscale VPN" if ip.startswith("100.") else "Local Wi-Fi"
+        print(f"[+] Connect Phone ({label}): http://{ip}:{PORT}")
     print(f"[*] Serving Mobile PWA client from: {CLIENT_DIR}")
     print("=" * 60)
 
