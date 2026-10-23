@@ -28,14 +28,11 @@ if exist "C:\Program Files (x86)\cloudflared\cloudflared.exe" (
 )
 
 if defined CLOUDFLARED_BIN (
-    tasklist /FI "IMAGENAME eq cloudflared.exe" 2>nul | find /I /N "cloudflared.exe" >nul 2>&1
-    if %errorLevel% neq 0 (
-        echo [*] Launching Cloudflare Tunnel in background...
-        start "RENI Cloudflare Tunnel" /MIN "%CLOUDFLARED_BIN%" tunnel run --url http://localhost:8765 reni
-        echo [+] Cloudflare Tunnel started in background.
-    ) else (
-        echo [+] Cloudflare Tunnel is already running in background.
-    )
+    echo [*] Checking for and terminating any prior RENI tunnel...
+    powershell -NoProfile -Command "Get-CimInstance Win32_Process -Filter 'Name = ''cloudflared.exe''' | Where-Object { $_.CommandLine -like '* reni*' -or $_.CommandLine -like '*8765*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force; Write-Host ('[+] Terminated previous RENI tunnel (PID ' + $_.ProcessId + ')') }"
+    echo [*] Launching fresh RENI Cloudflare Tunnel in background...
+    start "RENI Cloudflare Tunnel" /MIN "%CLOUDFLARED_BIN%" tunnel run --url http://localhost:8765 reni
+    echo [+] RENI Cloudflare Tunnel started in background.
 )
 
 :: 2. Check for Python virtual environment in RENIS\venv and launch server
@@ -55,3 +52,11 @@ if %errorLevel% neq 0 (
     echo [*] If dependencies are missing, run setup_renis_admin.bat first.
     pause
 )
+
+:: 3. Clean up RENI tunnel on shutdown
+if defined CLOUDFLARED_BIN (
+    echo.
+    echo [*] Stopping RENI Cloudflare Tunnel...
+    powershell -NoProfile -Command "Get-CimInstance Win32_Process -Filter 'Name = ''cloudflared.exe''' | Where-Object { $_.CommandLine -like '* reni*' -or $_.CommandLine -like '*8765*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }" >nul 2>&1
+)
+
