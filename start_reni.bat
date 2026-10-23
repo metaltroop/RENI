@@ -1,9 +1,9 @@
 @echo off
 setlocal
 
-title RENI // NITRO HOST SERVER LAUNCHER
+title RENI // HOST SERVER & TUNNEL LAUNCHER
 echo ==============================================================================
-echo   R.E.N.I.S. // LAUNCHING NITRO REMOTE ACCESS ENGINE
+echo   R.E.N.I.S. // LAUNCHING REMOTE ACCESS SYSTEM & INTERNET TUNNEL
 echo ==============================================================================
 
 :: Check for Administrative Elevation and re-run as admin if needed
@@ -16,7 +16,29 @@ if %errorLevel% neq 0 (
 
 cd /d "%~dp0"
 
-:: Check for Python virtual environment in RENIS\venv
+:: 1. Detect and auto-launch Cloudflare Tunnel if installed
+set "CLOUDFLARED_BIN="
+if exist "C:\Program Files (x86)\cloudflared\cloudflared.exe" (
+    set "CLOUDFLARED_BIN=C:\Program Files (x86)\cloudflared\cloudflared.exe"
+) else if exist "C:\Program Files\cloudflared\cloudflared.exe" (
+    set "CLOUDFLARED_BIN=C:\Program Files\cloudflared\cloudflared.exe"
+) else (
+    where.exe cloudflared.exe >nul 2>&1
+    if %errorLevel% equ 0 set "CLOUDFLARED_BIN=cloudflared"
+)
+
+if defined CLOUDFLARED_BIN (
+    tasklist /FI "IMAGENAME eq cloudflared.exe" 2>nul | find /I /N "cloudflared.exe" >nul 2>&1
+    if %errorLevel% neq 0 (
+        echo [*] Launching Cloudflare Tunnel in background...
+        start "RENI Cloudflare Tunnel" /MIN "%CLOUDFLARED_BIN%" tunnel run --url http://localhost:8765 reni
+        echo [+] Cloudflare Tunnel started in background.
+    ) else (
+        echo [+] Cloudflare Tunnel is already running in background.
+    )
+)
+
+:: 2. Check for Python virtual environment in RENIS\venv and launch server
 if exist "RENIS\venv\Scripts\activate.bat" (
     echo [*] Activating Python environment from .\RENIS\venv...
     call "RENIS\venv\Scripts\activate.bat"
