@@ -1,0 +1,43 @@
+# RENI - Git Ignore Rules
+# Never commit sensitive authentication, keys, virtual environments, or caches
+
+# Credentials & Authentication
+renis_auth.json
+RENIS/renis_auth.json
+*.pem
+*.key
+*.cert
+
+# Environment Variables
+.env
+RENIS/.env
+*.env.local
+
+# Virtual Environments
+venv/
+RENIS/venv/
+.venv/
+env/
+ENV/
+
+# Python Cache & Bytecode
+__pycache__/
+RENIS/__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+
+# OS and Editor Specifics
+.vscode/
+.idea/
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+.DS_Store
+
+# Logs & Temporary Files
+*.log
+scratch/
+temp/

@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="theme-color" content="#0B0C10">
+  <title>RENI // Nitro Remote Control</title>
+  
+  <link rel="manifest" href="/manifest.json">
+  <link rel="stylesheet" href="/style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;800&family=Orbitron:wght@600;800;900&family=Rajdhani:wght@500;600;700&display=swap" rel="stylesheet">
+</head>
+<body class="theme-crimson">
+  <!-- APP SHELL -->
+  <div id="app-container">
+    
+    <!-- TOP NITRO TELEMETRY HUD & HEADER -->
+    <header id="nitro-header">
+      <div class="header-left">
+        <div class="logo-group">
+          <span class="logo-brand">RENI</span>
+          <span class="logo-sub">NITRO</span>
+          <div class="status-pulse" id="connection-status" title="Connection Status"></div>
+        </div>
+        <!-- EASTER EGG #2: N2O OVERCLOCK BADGE (TAP 3X) -->
+        <button id="n2o-badge" class="badge-n2o" title="Tap 3 times for N2O Overclock">
+          <span class="badge-glow"></span>
+          <span class="badge-text">[N2O]</span>
+        </button>
+      </div>
+
+      <!-- EASTER EGG #3: NITRO SENSE MINI-HUD (psutil telemetry) -->
+      <div id="nitro-hud" class="telemetry-hud">
+        <!-- CPU Gauge -->
+        <div class="hud-gauge" id="hud-cpu" title="Host CPU Load">
+          <span class="gauge-label">CPU</span>
+          <div class="gauge-track">
+            <div class="gauge-fill" id="cpu-fill" style="width: 0%"></div>
+          </div>
+          <span class="gauge-value" id="cpu-val">0%</span>
+        </div>
+
+        <!-- RAM Gauge -->
+        <div class="hud-gauge" id="hud-ram" title="Host Memory Usage">
+          <span class="gauge-label">RAM</span>
+          <div class="gauge-track">
+            <div class="gauge-fill" id="ram-fill" style="width: 0%"></div>
+          </div>
+          <span class="gauge-value" id="ram-val">0%</span>
+        </div>
+
+        <!-- Battery / Power -->
+        <div class="hud-battery" id="hud-battery" title="Battery & Power">
+          <span class="battery-icon" id="battery-icon">⚡</span>
+          <span class="battery-value" id="battery-val">100%</span>
+        </div>
+      </div>
+
+      <!-- Header Controls -->
+      <div class="header-right">
+        <!-- Input Mode Switch -->
+        <button id="btn-mode-toggle" class="btn-icon" title="Toggle Trackpad / Direct Touch Mode">
+          <span id="mode-icon">🖱️</span>
+        </button>
+        <!-- Admin Shell Drawer Trigger -->
+        <button id="btn-open-terminal" class="btn-icon btn-shell" title="Elevated PowerShell Shell">
+          <span>&gt;_</span>
+        </button>
+        <!-- Power & Settings Drawer Trigger -->
+        <button id="btn-open-settings" class="btn-icon" title="Settings & Power Control">
+          <span>⚙️</span>
+        </button>
+      </div>
+    </header>
+
+    <!-- STREAMING CANVAS CONTAINER -->
+    <main id="viewport-container">
+      <div id="viewport-wrapper">
+        <canvas id="stream-canvas"></canvas>
+        <!-- Virtual Cursor for Trackpad Mode -->
+        <div id="virtual-cursor" class="v-cursor hidden">
+          <div class="cursor-pointer"></div>
+          <div class="cursor-trail"></div>
+        </div>
+        <!-- Stream Watermark / Offline Notice -->
+        <div id="stream-overlay" class="stream-overlay">
+          <div class="overlay-card">
+            <div class="nitro-loader"></div>
+            <p id="stream-status-text">INITIALIZING NITRO CORE STREAM...</p>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <!-- FLOATING TACTILE DOCK (SHORTCUT DECK) -->
+    <footer id="bottom-dock">
+      <!-- Hidden keyboard capture input -->
+      <input type="text" id="mobile-key-capture" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+
+      <div class="dock-scroll-row">
+        <!-- Virtual Keyboard Trigger -->
+        <button id="btn-keyboard-trigger" class="dock-btn dock-btn-primary" title="Show Phone Keyboard">
+          <span>⌨️ KEY</span>
+        </button>
+
+        <!-- Sticky Modifiers -->
+        <button id="btn-mod-ctrl" class="dock-btn mod-toggle" data-key="ctrl">CTRL</button>
+        <button id="btn-mod-alt" class="dock-btn mod-toggle" data-key="alt">ALT</button>
+        <button id="btn-mod-shift" class="dock-btn mod-toggle" data-key="shift">SHIFT</button>
+
+        <!-- Administrative Shortcuts -->
+        <button class="dock-btn" data-key="win" title="Windows Start Menu">WIN</button>
+        <button class="dock-btn" data-combo="alt,tab" title="Switch Tasks">ALT+TAB</button>
+        <button class="dock-btn dock-btn-warning" data-combo="ctrl,shift,esc" title="Windows Task Manager">TASKMGR</button>
+        <button class="dock-btn dock-btn-danger" data-combo="alt,f4" title="Close Active Window">ALT+F4</button>
+        <button class="dock-btn" data-key="enter">ENTER</button>
+        <button class="dock-btn" data-key="esc">ESC</button>
+        <button class="dock-btn" data-key="tab">TAB</button>
+
+        <!-- Clipboard Sync Button -->
+        <button id="btn-clipboard-open" class="dock-btn" title="Sync Clipboard">
+          <span>📋 CLIP</span>
+        </button>
+      </div>
+    </footer>
+
+    <!-- SLIDE-UP ELEVATED POWERSHELL TERMINAL DRAWER -->
+    <div id="terminal-drawer" class="drawer">
+      <div class="drawer-handle" id="terminal-drawer-handle"></div>
+      <div class="drawer-header">
+        <div class="drawer-title">
+          <span class="shell-badge">ELEVATED</span>
+          <h3>WINDOWS POWERSHELL</h3>
+        </div>
+        <div class="drawer-actions">
+          <button id="btn-term-clear" class="btn-sm">CLEAR</button>
+          <button id="btn-term-interrupt" class="btn-sm btn-danger">^C</button>
+          <button id="btn-close-terminal" class="btn-sm btn-close">✕</button>
+        </div>
+      </div>
+
+      <!-- Quick Command Macros -->
+      <div class="terminal-macros">
+        <button class="macro-chip" data-cmd="winget upgrade --all">winget upgrade</button>
+        <button class="macro-chip" data-cmd="Get-Process | Sort-Object CPU -Desc | Select -First 8">top cpu</button>
+        <button class="macro-chip" data-cmd="Get-Service | Where-Object Status -eq 'Running' | Select -First 10">services</button>
+        <button class="macro-chip" data-cmd="ipconfig">ipconfig</button>
+      </div>
+
+      <!-- Terminal Output Window -->
+      <div id="terminal-output" class="terminal-body"></div>
+
+      <!-- Command Input -->
+      <div class="terminal-input-bar">
+        <span class="prompt-symbol">PS&gt;</span>
+        <input type="text" id="terminal-input" placeholder="Type administrative command..." autocomplete="off" autocapitalize="off">
+        <button id="btn-term-send" class="btn-send">RUN</button>
+      </div>
+    </div>
+
+    <!-- SLIDE-UP SETTINGS & POWER DRAWER -->
+    <div id="settings-drawer" class="drawer">
+      <div class="drawer-handle" id="settings-drawer-handle"></div>
+      <div class="drawer-header">
+        <div class="drawer-title">
+          <h3>NITRO SYSTEM CONTROLS</h3>
+        </div>
+        <button id="btn-close-settings" class="btn-sm btn-close">✕</button>
+      </div>
+
+      <div class="drawer-content">
+        <!-- Biometric Registration Section -->
+        <div class="settings-group">
+          <h4>BIOMETRIC AUTHENTICATION</h4>
+          <button id="btn-register-passkey" class="nitro-btn btn-secondary">
+            <span>🛡️ Register Phone Biometrics (Passkey / Fingerprint)</span>
+          </button>
+          <button id="btn-open-pin-change" class="nitro-btn btn-secondary">
+            <span>🔑 Change Master PIN</span>
+          </button>
+        </div>
+
+        <!-- Privacy & Power Section -->
+        <div class="settings-group">
+          <h4>HOST POWER & PRIVACY</h4>
+          <div class="toggle-row">
+            <div class="toggle-info">
+              <span class="toggle-title">Privacy Monitor Blackout</span>
+              <span class="toggle-desc">Turn off physical laptop screen while streaming</span>
+            </div>
+            <label class="switch">
+              <input type="checkbox" id="toggle-blackout">
+              <span class="slider round"></span>
+            </label>
+          </div>
+
+          <div class="toggle-row">
+            <div class="toggle-info">
+              <span class="toggle-title">Keep-Awake (Lid Closed)</span>
+              <span class="toggle-desc">Prevent laptop sleep and standby</span>
+            </div>
+            <label class="switch">
+              <input type="checkbox" id="toggle-keepawake">
+              <span class="slider round"></span>
+            </label>
+          </div>
+
+          <!-- Power Macro Buttons -->
+          <div class="power-grid">
+            <button class="power-btn" data-action="lock">
+              <span>🔒 Lock</span>
+            </button>
+            <button class="power-btn" data-action="sleep">
+              <span>💤 Sleep</span>
+            </button>
+            <button class="power-btn btn-danger" data-action="restart">
+              <span>🔄 Restart</span>
+            </button>
+            <button class="power-btn btn-danger" data-action="shutdown">
+              <span>🛑 Shutdown</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Stream Quality & Performance Tuning -->
+        <div class="settings-group">
+          <h4>STREAM PERFORMANCE</h4>
+          <div class="slider-row">
+            <label>Resolution Scale: <span id="scale-label">75%</span></label>
+            <input type="range" id="stream-scale-slider" min="0.25" max="1.0" step="0.25" value="0.75">
+          </div>
+          <div class="slider-row">
+            <label>Quality: <span id="quality-label">65%</span></label>
+            <input type="range" id="stream-quality-slider" min="30" max="95" step="5" value="65">
+          </div>
+          <div class="slider-row">
+            <label>Target FPS: <span id="fps-label">20 FPS</span></label>
+            <input type="range" id="stream-fps-slider" min="10" max="35" step="5" value="20">
+          </div>
+          <div class="slider-row">
+            <label>Trackpad Sensitivity: <span id="sens-label">1.5x</span></label>
+            <input type="range" id="trackpad-sens-slider" min="0.5" max="3.0" step="0.1" value="1.5">
+          </div>
+        </div>
+
+        <!-- Wake-on-LAN Broadcast Section -->
+        <div class="settings-group">
+          <h4>WAKE-ON-LAN (MAGIC PACKET)</h4>
+          <div class="wol-input-row">
+            <input type="text" id="wol-mac-input" placeholder="MAC (e.g., 00:11:22:33:44:55)">
+            <button id="btn-trigger-wol" class="nitro-btn btn-primary">BROADCAST</button>
+          </div>
+        </div>
+
+        <!-- Logout -->
+        <div class="settings-group">
+          <button id="btn-logout" class="nitro-btn btn-danger-outline">
+            LOGOUT / DISCONNECT SESSION
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- CLIPBOARD SYNC MODAL -->
+    <div id="clipboard-modal" class="modal-overlay hidden">
+      <div class="modal-card">
+        <div class="modal-header">
+          <h3>HOST CLIPBOARD SYNC</h3>
+          <button id="btn-close-clipboard" class="btn-close">✕</button>
+        </div>
+        <div class="modal-body">
+          <textarea id="clipboard-textarea" placeholder="Clipboard content..."></textarea>
+          <div class="modal-btn-row">
+            <button id="btn-clip-pull" class="nitro-btn btn-secondary">⬇️ Pull from Laptop</button>
+            <button id="btn-clip-push" class="nitro-btn btn-primary">⬆️ Push to Laptop</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- CHANGE MASTER PIN MODAL -->
+    <div id="change-pin-modal" class="modal-overlay hidden">
+      <div class="modal-card">
+        <div class="modal-header">
+          <h3>CHANGE MASTER PIN</h3>
+          <button id="btn-close-pin-modal" class="btn-close">✕</button>
+        </div>
+        <div class="modal-body">
+          <div class="input-field">
+            <label>Current Master PIN</label>
+            <input type="password" id="input-old-pin" maxlength="6" inputmode="numeric" placeholder="Current PIN">
+          </div>
+          <div class="input-field">
+            <label>New Master PIN (6 digits)</label>
+            <input type="password" id="input-new-pin" maxlength="6" inputmode="numeric" placeholder="New PIN">
+          </div>
+          <button id="btn-save-new-pin" class="nitro-btn btn-primary">UPDATE MASTER PIN</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- AUTHENTICATION & LOCK SCREEN OVERLAY -->
+    <div id="auth-overlay" class="auth-screen">
+      <div class="auth-box">
+        <div class="auth-header">
+          <div class="nitro-shield-icon">⚡</div>
+          <h1 class="auth-title">R.E.N.I.S.</h1>
+          <p class="auth-subtitle">NITRO ENGINE LOCKED // VERIFY CREDENTIALS</p>
+        </div>
+
+        <!-- PIN Digits Indicator -->
+        <div class="pin-display">
+          <div class="pin-dot" id="pdot-0"></div>
+          <div class="pin-dot" id="pdot-1"></div>
+          <div class="pin-dot" id="pdot-2"></div>
+          <div class="pin-dot" id="pdot-3"></div>
+          <div class="pin-dot" id="pdot-4"></div>
+          <div class="pin-dot" id="pdot-5"></div>
+        </div>
+
+        <!-- Touch Keypad -->
+        <div class="pin-keypad">
+          <button class="keypad-btn" data-val="1">1</button>
+          <button class="keypad-btn" data-val="2">2</button>
+          <button class="keypad-btn" data-val="3">3</button>
+          <button class="keypad-btn" data-val="4">4</button>
+          <button class="keypad-btn" data-val="5">5</button>
+          <button class="keypad-btn" data-val="6">6</button>
+          <button class="keypad-btn" data-val="7">7</button>
+          <button class="keypad-btn" data-val="8">8</button>
+          <button class="keypad-btn" data-val="9">9</button>
+          <button class="keypad-btn keypad-func" id="btn-keypad-clear">CLR</button>
+          <button class="keypad-btn" data-val="0">0</button>
+          <button class="keypad-btn keypad-func" id="btn-keypad-back">⌫</button>
+        </div>
+
+        <!-- Biometric Button -->
+        <div class="auth-biometric-section">
+          <button id="btn-biometric-login" class="btn-biometric">
+            <span class="bio-icon">🧬</span>
+            <span class="bio-text">Use Phone Fingerprint / FaceID</span>
+          </button>
+        </div>
+
+        <div id="auth-feedback" class="auth-feedback"></div>
+      </div>
+    </div>
+
+    <!-- TOAST NOTIFICATION CONTAINER -->
+    <div id="nitro-toast" class="toast hidden"></div>
+
+  </div>
+
+  <script src="/app.js"></script>
+</body>
+</html>
