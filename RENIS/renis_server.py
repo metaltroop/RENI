@@ -9,6 +9,13 @@
 
 import os
 import sys
+from pathlib import Path
+
+# Ensure SERVER_DIR is in sys.path so local imports (e.g. renis_wol_trigger) always resolve
+SERVER_DIR = Path(__file__).resolve().parent
+if str(SERVER_DIR) not in sys.path:
+    sys.path.insert(0, str(SERVER_DIR))
+
 import io
 import time
 import json
@@ -20,20 +27,21 @@ import asyncio
 import socket
 import ctypes
 from typing import Optional, Dict, Any, List
-from pathlib import Path
 
 # Try loading environment variables
 try:
     from dotenv import load_dotenv
-    load_dotenv(Path(__file__).resolve().parent / ".env")
+    load_dotenv(SERVER_DIR / ".env")
 except ImportError:
     pass
 
-# Ensure PyAutoGUI does not crash when cursor reaches screen boundaries
+# Ensure PyAutoGUI is ultra-responsive and does not crash at screen edges
 try:
     import pyautogui
     pyautogui.FAILSAFE = False
-    pyautogui.PAUSE = 0.001
+    pyautogui.PAUSE = 0
+    pyautogui.MINIMUM_DURATION = 0
+    pyautogui.MINIMUM_SLEEP = 0
 except ImportError:
     pyautogui = None
 
@@ -42,7 +50,7 @@ try:
 except ImportError:
     mss = None
 
-from PIL import Image
+from PIL import Image, ImageDraw
 import psutil
 import jwt
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends, Query, status, Request
@@ -70,7 +78,6 @@ NITRO_TERMINAL_BANNER = r"""
 # ==============================================================================
 # DIRECTORY RESOLUTION & CONSTANTS
 # ==============================================================================
-SERVER_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SERVER_DIR.parent
 CLIENT_DIR = REPO_ROOT / "RENIC"
 AUTH_FILE = SERVER_DIR / "renis_auth.json"
@@ -187,6 +194,46 @@ def verify_jwt_token(token: str) -> bool:
     except Exception:
         return False
 
+def safe_b64url_decode(s: str) -> bytes:
+    """Decodes base64url or standard base64 string to bytes with proper padding."""
+    s = s.replace('-', '+').replace('_', '/')
+    padding = len(s) % 4
+    if padding:
+        s += '=' * (4 - padding)
+    return base64.b64decode(s)
+
+def verify_and_consume_challenge(client_data_b64: Optional[str]) -> bool:
+    """
+    Decodes clientDataJSON, extracts the WebAuthn challenge, validates against
+    PENDING_CHALLENGES, checks expiration, and immediately deletes it to prevent replay attacks.
+    """
+    if not client_data_b64:
+        return False
+    try:
+        raw_json = safe_b64url_decode(client_data_b64).decode('utf-8')
+        client_data = json.loads(raw_json)
+        challenge = client_data.get("challenge")
+        
+        now = time.time()
+        # Prune expired challenges
+        expired_keys = [k for k, exp in PENDING_CHALLENGES.items() if now >= exp]
+        for k in expired_keys:
+            del PENDING_CHALLENGES[k]
+
+        if not challenge or challenge not in PENDING_CHALLENGES:
+            return False
+
+        if now >= PENDING_CHALLENGES[challenge]:
+            del PENDING_CHALLENGES[challenge]
+            return False
+
+        # Consume challenge so it cannot be replayed
+        del PENDING_CHALLENGES[challenge]
+        return True
+    except Exception as e:
+        print(f"[!] WebAuthn challenge verification exception: {e}")
+        return False
+
 # ==============================================================================
 # FASTAPI APPLICATION SETUP
 # ==============================================================================
@@ -238,7 +285,6 @@ async def login_with_pin(payload: Dict[str, str]):
 @app.post("/api/auth/change-pin")
 async def change_master_pin(payload: Dict[str, str], request: Request):
     """Updates the Master PIN to a new value."""
-    # Validate authorization
     auth_header = request.headers.get("Authorization", "")
     token = auth_header.replace("Bearer ", "") if "Bearer " in auth_header else ""
     old_pin = payload.get("old_pin", "")
@@ -275,8 +321,13 @@ async def webauthn_register_options(request: Request):
     if not token or not verify_jwt_token(token):
         raise HTTPException(status_code=401, detail="Valid session required to register biometrics")
 
+    # Prune expired challenges
+    now = time.time()
+    for k in [k for k, exp in PENDING_CHALLENGES.items() if now >= exp]:
+        del PENDING_CHALLENGES[k]
+
     challenge = secrets.token_urlsafe(32)
-    PENDING_CHALLENGES[challenge] = time.time() + 300 # 5 min TTL
+    PENDING_CHALLENGES[challenge] = now + 300 # 5 min TTL
 
     return {
         "challenge": challenge,
@@ -294,7 +345,7 @@ async def webauthn_register_options(request: Request):
             {"alg": -257, "type": "public-key"} # RS256
         ],
         "authenticatorSelection": {
-            "authenticatorAttachment": "platform", # Device fingerprint/FaceID
+            "authenticatorAttachment": "platform",
             "userVerification": "required",
             "residentKey": "preferred"
         },
@@ -317,26 +368,37 @@ async def webauthn_register_verify(payload: Dict[str, Any], request: Request):
     if not cred_id or not response_data:
         raise HTTPException(status_code=400, detail="Invalid credential registration payload")
 
+    # Verify and consume the challenge to prevent replay
+    client_data_b64 = response_data.get("clientDataJSON")
+    if not verify_and_consume_challenge(client_data_b64):
+        raise HTTPException(status_code=400, detail="Invalid, expired, or replayed WebAuthn challenge")
+
     new_cred = {
         "id": cred_id,
         "raw_id": raw_id,
         "registered_at": time.time(),
-        "client_data": response_data.get("clientDataJSON")
+        "client_data": client_data_b64
     }
 
     AUTH_DATA.setdefault("webauthn_credentials", []).append(new_cred)
     save_auth_store()
     return {"success": True, "message": "Biometric hardware credential registered successfully"}
 
-@app.post("/api/auth/webauthn/login-options")
+# Support BOTH GET and POST to prevent 405 Method Not Allowed
+@app.api_route("/api/auth/webauthn/login-options", methods=["GET", "POST"])
 async def webauthn_login_options(request: Request):
     """Generates assertion options for biometric passkey authentication."""
     credentials = AUTH_DATA.get("webauthn_credentials", [])
     if not credentials:
         raise HTTPException(status_code=400, detail="No biometrics registered on host. Use Master PIN.")
 
+    # Prune expired challenges
+    now = time.time()
+    for k in [k for k, exp in PENDING_CHALLENGES.items() if now >= exp]:
+        del PENDING_CHALLENGES[k]
+
     challenge = secrets.token_urlsafe(32)
-    PENDING_CHALLENGES[challenge] = time.time() + 300
+    PENDING_CHALLENGES[challenge] = now + 300
 
     allow_credentials = [
         {"id": c["id"], "type": "public-key", "transports": ["internal"]}
@@ -357,6 +419,12 @@ async def webauthn_login_verify(payload: Dict[str, Any]):
     cred_id = payload.get("id")
     if not cred_id:
         raise HTTPException(status_code=400, detail="Missing credential ID")
+
+    # Verify and consume challenge to prevent replay/spoofing
+    response_data = payload.get("response", {})
+    client_data_b64 = response_data.get("clientDataJSON")
+    if not verify_and_consume_challenge(client_data_b64):
+        raise HTTPException(status_code=400, detail="Invalid, expired, or replayed WebAuthn challenge")
 
     # Match registered credential
     registered_ids = [c["id"] for c in AUTH_DATA.get("webauthn_credentials", [])]
@@ -437,7 +505,6 @@ async def toggle_privacy_blackout(payload: Dict[str, Any], request: Request):
         try:
             ctypes.windll.user32.SendMessageW(HWND_BROADCAST, WM_SYSCOMMAND, SC_MONITORPOWER, mode)
             if not turn_off and pyautogui:
-                # Nudge mouse slightly to wake screen
                 pyautogui.moveRel(1, 0)
                 pyautogui.moveRel(-1, 0)
             return {"success": True, "blackout": turn_off, "message": f"Monitor set to {'OFF' if turn_off else 'ON'}"}
@@ -558,7 +625,7 @@ async def trigger_wol_broadcast(payload: Dict[str, Any], request: Request):
 async def websocket_stream(websocket: WebSocket, token: Optional[str] = Query(None)):
     """
     Ultra-low-latency desktop video stream over binary WebSocket frames.
-    Accepts client parameters dynamically for FPS (10-35 N2O), Scale (0.5-1.0), Quality (40-90).
+    Draws the real Windows host cursor onto the image to eliminate cursor desync.
     """
     if not token or not verify_jwt_token(token):
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
@@ -607,8 +674,9 @@ async def websocket_stream(websocket: WebSocket, token: Optional[str] = Query(No
 
     try:
         with mss.mss() as sct:
-            # Primary monitor: index 1
             monitor = sct.monitors[1] if len(sct.monitors) > 1 else sct.monitors[0]
+            mon_left = monitor.get("left", 0)
+            mon_top = monitor.get("top", 0)
             
             while config["running"]:
                 start_time = time.perf_counter()
@@ -616,6 +684,37 @@ async def websocket_stream(websocket: WebSocket, token: Optional[str] = Query(No
                 # Screen capture
                 sct_img = sct.grab(monitor)
                 img = Image.frombytes("RGB", sct_img.size, sct_img.bgra, "raw", "BGRX")
+
+                # Draw real Windows host cursor directly onto frame before scaling
+                if pyautogui:
+                    try:
+                        cur_x, cur_y = pyautogui.position()
+                        rel_x = cur_x - mon_left
+                        rel_y = cur_y - mon_top
+
+                        if 0 <= rel_x < img.width and 0 <= rel_y < img.height:
+                            draw = ImageDraw.Draw(img)
+                            r_outer = 7
+                            r_inner = 3
+                            # Nitro Crimson Red outer ring
+                            draw.ellipse(
+                                (rel_x - r_outer, rel_y - r_outer, rel_x + r_outer, rel_y + r_outer),
+                                outline=(255, 0, 51),
+                                width=2
+                            )
+                            # High-contrast white center dot
+                            draw.ellipse(
+                                (rel_x - r_inner, rel_y - r_inner, rel_x + r_inner, rel_y + r_inner),
+                                fill=(255, 255, 255),
+                                outline=(0, 0, 0)
+                            )
+                            # Crosshair ticks for enhanced visibility
+                            draw.line((rel_x - r_outer - 4, rel_y, rel_x - r_outer + 1, rel_y), fill=(255, 0, 51), width=2)
+                            draw.line((rel_x + r_outer - 1, rel_y, rel_x + r_outer + 4, rel_y), fill=(255, 0, 51), width=2)
+                            draw.line((rel_x, rel_y - r_outer - 4, rel_x, rel_y - r_outer + 1), fill=(255, 0, 51), width=2)
+                            draw.line((rel_x, rel_y + r_outer - 1, rel_x, rel_y + r_outer + 4), fill=(255, 0, 51), width=2)
+                    except Exception:
+                        pass
 
                 # Scale frame if requested
                 scale = config["scale"]
@@ -759,7 +858,7 @@ async def websocket_terminal(websocket: WebSocket, token: Optional[str] = Query(
     """
     Provides an interactive, elevated PowerShell shell drawer inside RENIC.
     Permits executing administrative tasks (winget, choco, service start, reg queries)
-    with real-time streaming of stdout/stderr.
+    with real-time streaming of stdout/stderr in UTF-8 encoding.
     """
     if not token or not verify_jwt_token(token):
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
@@ -776,6 +875,11 @@ async def websocket_terminal(websocket: WebSocket, token: Optional[str] = Query(
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE
         )
+        
+        # Configure PowerShell output encoding to UTF-8
+        if proc.stdin:
+            proc.stdin.write(b"[Console]::OutputEncoding = [System.Text.Encoding]::UTF8\r\n")
+            await proc.stdin.drain()
     except Exception as e:
         await websocket.send_text(json.dumps({"type": "error", "data": f"Failed to spawn shell: {e}\r\n"}))
         await websocket.close()
@@ -784,13 +888,13 @@ async def websocket_terminal(websocket: WebSocket, token: Optional[str] = Query(
     terminal_active = True
 
     async def read_stream(stream, stream_name: str):
-        """Reads lines from stdout/stderr and dispatches over WebSocket."""
+        """Reads lines from stdout/stderr in UTF-8 and dispatches over WebSocket."""
         try:
             while terminal_active:
                 line = await stream.readline()
                 if not line:
                     break
-                decoded = line.decode('cp1252', errors='replace')
+                decoded = line.decode('utf-8', errors='replace')
                 await websocket.send_text(json.dumps({
                     "type": stream_name,
                     "data": decoded
@@ -843,7 +947,7 @@ async def websocket_terminal(websocket: WebSocket, token: Optional[str] = Query(
             pass
 
 # ==============================================================================
-# CLIENT STATIC FILES & PWA ROUTING
+# CLIENT STATIC FILES & PWA ROUTING (PATH-TRAVERSAL HARDENED)
 # ==============================================================================
 if CLIENT_DIR.exists():
     app.mount("/static", StaticFiles(directory=str(CLIENT_DIR)), name="static")
@@ -858,10 +962,15 @@ async def serve_index():
 
 @app.get("/{filename}")
 async def serve_root_pwa_files(filename: str):
-    """Serves root PWA assets like manifest.json, sw.js, style.css, app.js."""
-    target_file = CLIENT_DIR / filename
+    """Serves root PWA assets with strict path-traversal prevention."""
+    target_file = (CLIENT_DIR / filename).resolve()
+    client_dir_resolved = CLIENT_DIR.resolve()
+
+    # Prevent path traversal outside CLIENT_DIR
+    if not str(target_file).startswith(str(client_dir_resolved)):
+        raise HTTPException(status_code=403, detail="Forbidden")
+
     if target_file.exists() and target_file.is_file():
-        # Set proper MIME types for service worker and manifest
         media_type = None
         if filename.endswith(".js"):
             media_type = "application/javascript"
@@ -869,6 +978,8 @@ async def serve_root_pwa_files(filename: str):
             media_type = "application/manifest+json" if "manifest" in filename else "application/json"
         elif filename.endswith(".css"):
             media_type = "text/css"
+        elif filename.endswith(".png"):
+            media_type = "image/png"
         return FileResponse(target_file, media_type=media_type)
     return JSONResponse(status_code=404, content={"detail": f"File {filename} not found"})
 

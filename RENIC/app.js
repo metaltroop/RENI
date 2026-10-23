@@ -26,7 +26,6 @@
     // Touch & Input
     inputMode: 'trackpad', // 'trackpad' | 'direct'
     trackpadSensitivity: 1.5,
-    virtualCursor: { x: window.innerWidth / 2, y: window.innerHeight / 2 },
     stickyModifiers: new Set(),
     
     // Canvas & Video Resolution
@@ -125,6 +124,11 @@
     toast: document.getElementById('nitro-toast')
   };
 
+  // Ensure DOM virtual cursor is hidden; real cursor is rendered directly on stream frames
+  if (dom.virtualCursor) {
+    dom.virtualCursor.classList.add('hidden');
+  }
+
   // ==============================================================================
   // TOAST NOTIFICATION UTILITY
   // ==============================================================================
@@ -136,6 +140,27 @@
     toastTimer = setTimeout(() => {
       dom.toast.classList.add('hidden');
     }, duration);
+  }
+
+  // ==============================================================================
+  // CANVAS TRANSFORM (PINCH-TO-ZOOM & PAN)
+  // ==============================================================================
+  function applyCanvasTransform() {
+    if (state.zoomScale <= 1.01) {
+      state.zoomScale = 1.0;
+      state.panX = 0;
+      state.panY = 0;
+      dom.canvas.style.transform = 'none';
+    } else {
+      dom.canvas.style.transform = `translate3d(${state.panX}px, ${state.panY}px, 0) scale(${state.zoomScale})`;
+    }
+  }
+
+  function resetZoom() {
+    state.zoomScale = 1.0;
+    state.panX = 0;
+    state.panY = 0;
+    applyCanvasTransform();
   }
 
   // ==============================================================================
@@ -248,7 +273,8 @@
 
     try {
       dom.authFeedback.textContent = "Requesting biometric challenge...";
-      const optRes = await fetch('/api/auth/webauthn/login-options');
+      // Use POST method matching server expectation
+      const optRes = await fetch('/api/auth/webauthn/login-options', { method: 'POST' });
       if (!optRes.ok) {
         const err = await optRes.json();
         dom.authFeedback.textContent = err.detail || "No biometrics registered";
@@ -429,7 +455,7 @@
       // Keep awake sync
       dom.toggleKeepawake.checked = !!data.keep_awake;
     } catch (err) {
-      // Background telemetry failed
+      // Telemetry request failed
     }
   }
 
@@ -470,7 +496,7 @@
     };
 
     state.streamSocket.onmessage = async (event) => {
-      if (typeof event.data === 'string') return; // Config/error message
+      if (typeof event.data === 'string') return; // Config or error message
 
       try {
         const imageBitmap = await createImageBitmap(event.data);
@@ -508,7 +534,7 @@
   }
 
   // ==============================================================================
-  // WEBSOCKET 2: DUAL-MODE INPUT & CONTROL ENGINE
+  // WEBSOCKET 2: DUAL-MODE INPUT & THROTTLED CONTROL ENGINE
   // ==============================================================================
   function sendControl(payload) {
     if (state.controlSocket && state.controlSocket.readyState === WebSocket.OPEN) {
@@ -535,23 +561,76 @@
     };
   }
 
-  // Touch & Gesture Engine Implementation
+  // Throttled Movement Pipeline: sends at most once every ~16ms (~60Hz)
+  let moveThrottleTimer = null;
+  let pendingRelDx = 0;
+  let pendingRelDy = 0;
+  let pendingAbsPos = null;
+  let lastMoveSendTime = 0;
+
+  function flushThrottledMoves() {
+    const now = performance.now();
+    if (state.inputMode === 'trackpad') {
+      if (pendingRelDx !== 0 || pendingRelDy !== 0) {
+        sendControl({ type: "mouse_move_rel", dx: pendingRelDx, dy: pendingRelDy });
+        pendingRelDx = 0;
+        pendingRelDy = 0;
+      }
+    } else if (state.inputMode === 'direct') {
+      if (pendingAbsPos !== null) {
+        sendControl({ type: "mouse_move_abs", x: pendingAbsPos.x, y: pendingAbsPos.y });
+        pendingAbsPos = null;
+      }
+    }
+    lastMoveSendTime = now;
+    moveThrottleTimer = null;
+  }
+
+  function queueMouseMoveRel(dx, dy) {
+    pendingRelDx += dx;
+    pendingRelDy += dy;
+    const now = performance.now();
+    if (now - lastMoveSendTime >= 16) {
+      if (moveThrottleTimer) {
+        cancelAnimationFrame(moveThrottleTimer);
+        moveThrottleTimer = null;
+      }
+      flushThrottledMoves();
+    } else if (!moveThrottleTimer) {
+      moveThrottleTimer = requestAnimationFrame(flushThrottledMoves);
+    }
+  }
+
+  function queueMouseMoveAbs(normX, normY) {
+    pendingAbsPos = { x: normX, y: normY };
+    const now = performance.now();
+    if (now - lastMoveSendTime >= 16) {
+      if (moveThrottleTimer) {
+        cancelAnimationFrame(moveThrottleTimer);
+        moveThrottleTimer = null;
+      }
+      flushThrottledMoves();
+    } else if (!moveThrottleTimer) {
+      moveThrottleTimer = requestAnimationFrame(flushThrottledMoves);
+    }
+  }
+
+  // Touch & Gesture Tracking
   let touchStartTime = 0;
   let lastTapTime = 0;
   let touchStartPos = { x: 0, y: 0 };
   let lastTouchPos = { x: 0, y: 0 };
   let isDragging = false;
-  let isTwoFingerTouch = false;
+  let isTwoFingerGesture = false;
   let twoFingerStartY = 0;
   let hasMovedSignificantly = false;
 
-  function updateVirtualCursor(clientX, clientY) {
-    state.virtualCursor.x = Math.max(0, Math.min(window.innerWidth, clientX));
-    state.virtualCursor.y = Math.max(0, Math.min(window.innerHeight, clientY));
-    dom.virtualCursor.style.transform = `translate3d(${state.virtualCursor.x}px, ${state.virtualCursor.y}px, 0)`;
-  }
+  // Pinch-to-zoom tracking variables
+  let initialPinchDist = 0;
+  let initialZoomScale = 1.0;
+  let initialMidpoint = { x: 0, y: 0 };
+  let initialPan = { x: 0, y: 0 };
 
-  // Mode 1: Precision Trackpad Mode & Mode 2: Direct Touch
   dom.viewportWrapper.addEventListener('touchstart', (e) => {
     touchStartTime = Date.now();
     hasMovedSignificantly = false;
@@ -560,30 +639,43 @@
       const touch = e.touches[0];
       touchStartPos = { x: touch.clientX, y: touch.clientY };
       lastTouchPos = { x: touch.clientX, y: touch.clientY };
-      isTwoFingerTouch = false;
+      isTwoFingerGesture = false;
 
       if (state.inputMode === 'trackpad') {
-        dom.virtualCursor.classList.remove('hidden');
-        // Check for double-tap-to-drag
+        // Double-tap-to-drag detection
         const timeSinceLastTap = touchStartTime - lastTapTime;
         if (timeSinceLastTap < 280) {
           isDragging = true;
+          flushThrottledMoves();
           sendControl({ type: "mouse_down", button: "left" });
         }
       }
     } else if (e.touches.length === 2) {
-      isTwoFingerTouch = true;
+      isTwoFingerGesture = true;
       twoFingerStartY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+
+      if (state.inputMode === 'direct') {
+        initialPinchDist = Math.hypot(
+          e.touches[0].clientX - e.touches[1].clientX,
+          e.touches[0].clientY - e.touches[1].clientY
+        );
+        initialZoomScale = state.zoomScale;
+        initialMidpoint = {
+          x: (e.touches[0].clientX + e.touches[1].clientX) / 2,
+          y: (e.touches[0].clientY + e.touches[1].clientY) / 2
+        };
+        initialPan = { x: state.panX, y: state.panY };
+      }
     }
   }, { passive: false });
 
   dom.viewportWrapper.addEventListener('touchmove', (e) => {
     e.preventDefault();
 
-    if (e.touches.length === 1 && !isTwoFingerTouch) {
+    if (e.touches.length === 1 && !isTwoFingerGesture) {
       const touch = e.touches[0];
-      const dx = (touch.clientX - lastTouchPos.x) * state.trackpadSensitivity;
-      const dy = (touch.clientY - lastTouchPos.y) * state.trackpadSensitivity;
+      const rawDx = (touch.clientX - lastTouchPos.x) * state.trackpadSensitivity;
+      const rawDy = (touch.clientY - lastTouchPos.y) * state.trackpadSensitivity;
       
       const distFromStart = Math.hypot(touch.clientX - touchStartPos.x, touch.clientY - touchStartPos.y);
       if (distFromStart > 6) {
@@ -591,33 +683,57 @@
       }
 
       if (state.inputMode === 'trackpad') {
-        sendControl({ type: "mouse_move_rel", dx, dy });
-        updateVirtualCursor(state.virtualCursor.x + dx, state.virtualCursor.y + dy);
+        queueMouseMoveRel(rawDx, rawDy);
       } else {
-        // Direct Touch absolute mapping
+        // Direct Touch: compute coordinates taking current canvas scale/pan into account
         const rect = dom.canvas.getBoundingClientRect();
         if (rect.width > 0 && rect.height > 0) {
           const normX = Math.max(0, Math.min(1, (touch.clientX - rect.left) / rect.width));
           const normY = Math.max(0, Math.min(1, (touch.clientY - rect.top) / rect.height));
-          sendControl({ type: "mouse_move_abs", x: normX, y: normY });
+          queueMouseMoveAbs(normX, normY);
         }
       }
 
       lastTouchPos = { x: touch.clientX, y: touch.clientY };
-    } else if (e.touches.length === 2 && isTwoFingerTouch) {
+    } else if (e.touches.length === 2 && isTwoFingerGesture) {
       hasMovedSignificantly = true;
-      const curY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
-      const deltaY = curY - twoFingerStartY;
-      if (Math.abs(deltaY) > 8) {
-        const scrollAmount = deltaY > 0 ? 120 : -120;
-        sendControl({ type: "mouse_scroll", dy: scrollAmount });
-        twoFingerStartY = curY;
+
+      if (state.inputMode === 'direct') {
+        // Pinch-to-zoom calculation
+        const curDist = Math.hypot(
+          e.touches[0].clientX - e.touches[1].clientX,
+          e.touches[0].clientY - e.touches[1].clientY
+        );
+        const scaleRatio = curDist / (initialPinchDist || 1);
+        const newScale = Math.max(1.0, Math.min(4.0, initialZoomScale * scaleRatio));
+        
+        const curMidpoint = {
+          x: (e.touches[0].clientX + e.touches[1].clientX) / 2,
+          y: (e.touches[0].clientY + e.touches[1].clientY) / 2
+        };
+
+        state.zoomScale = newScale;
+        state.panX = initialPan.x + (curMidpoint.x - initialMidpoint.x);
+        state.panY = initialPan.y + (curMidpoint.y - initialMidpoint.y);
+        applyCanvasTransform();
+      } else {
+        // Trackpad Two-Finger Scroll
+        const curY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+        const deltaY = curY - twoFingerStartY;
+        if (Math.abs(deltaY) > 8) {
+          const scrollAmount = deltaY > 0 ? 120 : -120;
+          sendControl({ type: "mouse_scroll", dy: scrollAmount });
+          twoFingerStartY = curY;
+        }
       }
     }
   }, { passive: false });
 
   dom.viewportWrapper.addEventListener('touchend', (e) => {
     const duration = Date.now() - touchStartTime;
+
+    // Flush any pending move messages before click actions
+    flushThrottledMoves();
 
     if (isDragging) {
       isDragging = false;
@@ -626,18 +742,27 @@
       return;
     }
 
-    if (isTwoFingerTouch) {
-      if (!hasMovedSignificantly && duration < 300) {
+    if (isTwoFingerGesture) {
+      if (!hasMovedSignificantly && duration < 300 && state.inputMode === 'trackpad') {
         // Two-Finger Single Tap: Right Click
         sendControl({ type: "mouse_click", button: "right" });
       }
-      isTwoFingerTouch = false;
+      isTwoFingerGesture = false;
       return;
     }
 
     if (!hasMovedSignificantly && duration < 250) {
-      // 1-Finger Single Tap: Left Click
+      // Direct mode double-tap to reset zoom
       if (state.inputMode === 'direct') {
+        const timeSinceLastTap = Date.now() - lastTapTime;
+        if (timeSinceLastTap < 280 && state.zoomScale > 1.05) {
+          resetZoom();
+          showToast("Zoom Reset (1.0x)");
+          lastTapTime = 0;
+          return;
+        }
+
+        // Direct Touch: Tap maps directly to desktop coordinate
         const rect = dom.canvas.getBoundingClientRect();
         if (rect.width > 0 && rect.height > 0) {
           const normX = Math.max(0, Math.min(1, (touchStartPos.x - rect.left) / rect.width));
@@ -645,6 +770,8 @@
           sendControl({ type: "mouse_move_abs", x: normX, y: normY });
         }
       }
+
+      // Single Tap: Left Click
       sendControl({ type: "mouse_click", button: "left" });
       lastTapTime = Date.now();
     }
@@ -655,13 +782,13 @@
     if (state.inputMode === 'trackpad') {
       state.inputMode = 'direct';
       dom.modeIcon.textContent = '👆';
-      dom.virtualCursor.classList.add('hidden');
-      showToast("Input Mode: Direct Touch Enabled");
+      resetZoom();
+      showToast("Input Mode: Direct Touch & Pinch-Zoom");
     } else {
       state.inputMode = 'trackpad';
       dom.modeIcon.textContent = '🖱️';
-      dom.virtualCursor.classList.remove('hidden');
-      showToast("Input Mode: Trackpad Precision Enabled");
+      resetZoom();
+      showToast("Input Mode: Trackpad Precision");
     }
   });
 
@@ -922,7 +1049,6 @@
   // Clipboard Sync
   dom.btnClipboardOpen.addEventListener('click', async () => {
     dom.clipboardModal.classList.remove('hidden');
-    // Pull automatically on open
     dom.btnClipPull.click();
   });
 
@@ -1024,7 +1150,6 @@
     initStreamWebSocket();
     initControlWebSocket();
     startTelemetryPolling();
-    updateVirtualCursor(window.innerWidth / 2, window.innerHeight / 2);
   }
 
   // Boot check
