@@ -40,6 +40,7 @@
     // UI State
     hudCollapsed: false,
     enteredPin: '',
+    currentClipboardImage: null,
     
     // Hidden Easter Egg Tap Counter
     eggTapCount: 0,
@@ -53,9 +54,11 @@
     connectionStatus: document.getElementById('connection-status'),
     easterEggTrigger: document.getElementById('easter-egg-trigger'),
     
-    // Telemetry HUD
+    // Telemetry HUD: Circular Gauges & Percentage
+    cpuCircleFill: document.getElementById('cpu-circle-fill'),
     cpuFill: document.getElementById('cpu-fill'),
     cpuVal: document.getElementById('cpu-val'),
+    ramCircleFill: document.getElementById('ram-circle-fill'),
     ramFill: document.getElementById('ram-fill'),
     ramVal: document.getElementById('ram-val'),
     batteryIcon: document.getElementById('battery-icon'),
@@ -146,6 +149,22 @@
     btnClipPushCustom: document.getElementById('btn-clip-push-custom'),
     btnClipClear: document.getElementById('btn-clip-clear'),
     btnSettingsOpenClip: document.getElementById('btn-settings-open-clip'),
+    tabClipText: document.getElementById('tab-clip-text'),
+    tabClipImg: document.getElementById('tab-clip-img'),
+    clipPaneText: document.getElementById('clip-pane-text'),
+    clipPaneImg: document.getElementById('clip-pane-img'),
+    btnClipSnapPc: document.getElementById('btn-clip-snap-pc'),
+    btnClipPickImg: document.getElementById('btn-clip-pick-img'),
+    clipFileInput: document.getElementById('clip-file-input'),
+    btnClipPasteImgActive: document.getElementById('btn-clip-paste-img-active'),
+    clipImgCard: document.getElementById('clip-img-card'),
+    clipImgPreview: document.getElementById('clip-img-preview'),
+    clipImgDims: document.getElementById('clip-img-dims'),
+    clipImgSize: document.getElementById('clip-img-size'),
+    btnClipDownloadImg: document.getElementById('btn-clip-download-img'),
+    btnClipCopyImg: document.getElementById('btn-clip-copy-img'),
+    btnClipPushImg: document.getElementById('btn-clip-push-img'),
+    clipImgEmpty: document.getElementById('clip-img-empty'),
 
     changePinModal: document.getElementById('change-pin-modal'),
     btnClosePinModal: document.getElementById('btn-close-pin-modal'),
@@ -594,12 +613,14 @@
       const data = await res.json();
       
       const cpu = Math.round(data.cpu.percent);
-      dom.cpuFill.style.width = `${cpu}%`;
-      dom.cpuVal.textContent = `${cpu}%`;
+      if (dom.cpuCircleFill) dom.cpuCircleFill.setAttribute('stroke-dasharray', `${cpu}, 100`);
+      if (dom.cpuFill) dom.cpuFill.style.width = `${cpu}%`;
+      if (dom.cpuVal) dom.cpuVal.textContent = `${cpu}%`;
 
       const ram = Math.round(data.memory.percent);
-      dom.ramFill.style.width = `${ram}%`;
-      dom.ramVal.textContent = `${ram}%`;
+      if (dom.ramCircleFill) dom.ramCircleFill.setAttribute('stroke-dasharray', `${ram}, 100`);
+      if (dom.ramFill) dom.ramFill.style.width = `${ram}%`;
+      if (dom.ramVal) dom.ramVal.textContent = `${ram}%`;
 
       const bat = data.battery;
       dom.batteryVal.textContent = `${bat.percent}%`;
@@ -1252,11 +1273,40 @@
         dom.clipboardTextarea.value = text;
         updateClipCounter();
       }
+
+      // Check if PC clipboard has a screenshot/image
+      if (data.image && data.image.has_image) {
+        renderClipboardImage(data.image.data_url, data.image.width, data.image.height, data.image.size_bytes);
+      }
+
       if (notify) showToast(`Pulled ${text.length} chars from PC`);
       return text;
     } catch (err) {
       if (notify) showToast("Failed to read PC clipboard");
       return '';
+    }
+  }
+
+  function renderClipboardImage(dataUrl, width, height, sizeBytes) {
+    state.currentClipboardImage = dataUrl;
+    if (dom.clipImgPreview) dom.clipImgPreview.src = dataUrl;
+    if (dom.clipImgDims) dom.clipImgDims.textContent = `${width || ''} × ${height || ''} px`;
+    if (dom.clipImgSize) dom.clipImgSize.textContent = sizeBytes ? `${Math.round(sizeBytes / 1024)} KB` : 'PNG Screenshot';
+    if (dom.clipImgCard) dom.clipImgCard.classList.remove('hidden');
+    if (dom.clipImgEmpty) dom.clipImgEmpty.classList.add('hidden');
+  }
+
+  function switchClipTab(tab) {
+    if (tab === 'text') {
+      if (dom.tabClipText) dom.tabClipText.classList.add('active');
+      if (dom.tabClipImg) dom.tabClipImg.classList.remove('active');
+      if (dom.clipPaneText) dom.clipPaneText.classList.remove('hidden');
+      if (dom.clipPaneImg) dom.clipPaneImg.classList.add('hidden');
+    } else {
+      if (dom.tabClipImg) dom.tabClipImg.classList.add('active');
+      if (dom.tabClipText) dom.tabClipText.classList.remove('active');
+      if (dom.clipPaneImg) dom.clipPaneImg.classList.remove('hidden');
+      if (dom.clipPaneText) dom.clipPaneText.classList.add('hidden');
     }
   }
 
@@ -1374,6 +1424,119 @@
     }
   }
 
+  // 4. Capture Fresh PC Desktop Screenshot to Clipboard
+  async function snapPcScreenshot() {
+    showToast("Capturing PC desktop screenshot...", 2000);
+    try {
+      const res = await fetch('/api/clipboard/capture-screen', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${state.token}` }
+      });
+      const data = await res.json();
+      if (res.ok && data.success && data.has_image) {
+        renderClipboardImage(data.data_url, data.width, data.height);
+        switchClipTab('img');
+        showToast("Captured PC Desktop Screenshot! 📸", 3000);
+      } else {
+        showToast(data.detail || "Screenshot capture failed");
+      }
+    } catch (err) {
+      showToast("Error capturing PC screenshot");
+    }
+  }
+
+  // 5. Push Image/Screenshot to PC Clipboard
+  async function pushImageToPc() {
+    if (!state.currentClipboardImage) {
+      showToast("No screenshot or image loaded to send");
+      return;
+    }
+    showToast("Pushing screenshot to PC clipboard...", 1500);
+    try {
+      const res = await fetch('/api/clipboard', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${state.token}`
+        },
+        body: JSON.stringify({ image_data: state.currentClipboardImage })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        showToast("Screenshot pushed to PC clipboard! 💻 Ready to Ctrl+V", 3500);
+      } else {
+        showToast(data.detail || "Failed to push screenshot");
+      }
+    } catch (err) {
+      showToast("Error sending screenshot to PC");
+    }
+  }
+
+  // 6. Paste Image into Active PC Window
+  async function pasteImageIntoPcActiveWindow() {
+    if (!state.currentClipboardImage) {
+      showToast("No screenshot or image loaded to paste");
+      return;
+    }
+    showToast("Pasting screenshot into PC active window...", 1500);
+    try {
+      const res = await fetch('/api/clipboard', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${state.token}`
+        },
+        body: JSON.stringify({ image_data: state.currentClipboardImage, paste_now: true })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        showToast("⚡ Screenshot Pasted into PC Active Window!", 3500);
+        dom.clipboardModal.classList.add('hidden');
+      } else {
+        showToast(data.detail || "Failed to paste screenshot");
+      }
+    } catch (err) {
+      showToast("Error pasting screenshot into PC");
+    }
+  }
+
+  // 7. Download Screenshot/Image to Phone
+  function downloadImageToPhone() {
+    if (!state.currentClipboardImage) {
+      showToast("No image to download");
+      return;
+    }
+    const a = document.createElement('a');
+    a.href = state.currentClipboardImage;
+    a.download = `reni_screenshot_${Date.now()}.png`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    showToast("Downloading screenshot to phone...");
+  }
+
+  // 8. Copy Image to Phone Clipboard
+  async function copyImageToPhoneClipboard() {
+    if (!state.currentClipboardImage) {
+      showToast("No image to copy");
+      return;
+    }
+    try {
+      const response = await fetch(state.currentClipboardImage);
+      const blob = await response.blob();
+      if (navigator.clipboard && navigator.clipboard.write) {
+        await navigator.clipboard.write([
+          new ClipboardItem({ 'image/png': blob })
+        ]);
+        showToast("Copied screenshot to Phone clipboard!");
+      } else {
+        downloadImageToPhone();
+      }
+    } catch (err) {
+      downloadImageToPhone();
+    }
+  }
+
   // Event Listeners for Clipboard Modal & Triggers
   if (dom.btnClipboardOpen) {
     dom.btnClipboardOpen.addEventListener('click', () => {
@@ -1396,6 +1559,9 @@
     });
   }
 
+  if (dom.tabClipText) dom.tabClipText.addEventListener('click', () => switchClipTab('text'));
+  if (dom.tabClipImg) dom.tabClipImg.addEventListener('click', () => switchClipTab('img'));
+
   if (dom.btnClipPhoneToPc) {
     dom.btnClipPhoneToPc.addEventListener('click', sendPhoneToPc);
   }
@@ -1407,6 +1573,35 @@
   if (dom.btnClipPasteActive) {
     dom.btnClipPasteActive.addEventListener('click', pasteIntoPcActiveWindow);
   }
+
+  if (dom.btnClipSnapPc) {
+    dom.btnClipSnapPc.addEventListener('click', snapPcScreenshot);
+  }
+
+  if (dom.btnClipPickImg && dom.clipFileInput) {
+    dom.btnClipPickImg.addEventListener('click', () => dom.clipFileInput.click());
+    dom.clipFileInput.addEventListener('change', (e) => {
+      const file = e.target.files && e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const dataUrl = event.target.result;
+        const img = new Image();
+        img.onload = () => {
+          renderClipboardImage(dataUrl, img.width, img.height, file.size);
+          switchClipTab('img');
+          showToast("Loaded phone image into preview! 🖼️");
+        };
+        img.src = dataUrl;
+      };
+      reader.readAsDataURL(file);
+    });
+  }
+
+  if (dom.btnClipPushImg) dom.btnClipPushImg.addEventListener('click', pushImageToPc);
+  if (dom.btnClipPasteImgActive) dom.btnClipPasteImgActive.addEventListener('click', pasteImageIntoPcActiveWindow);
+  if (dom.btnClipDownloadImg) dom.btnClipDownloadImg.addEventListener('click', downloadImageToPhone);
+  if (dom.btnClipCopyImg) dom.btnClipCopyImg.addEventListener('click', copyImageToPhoneClipboard);
 
   if (dom.btnClipCopyLocal) {
     dom.btnClipCopyLocal.addEventListener('click', async () => {

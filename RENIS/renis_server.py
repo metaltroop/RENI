@@ -659,7 +659,7 @@ async def system_power_action(payload: Dict[str, str], request: Request):
     raise HTTPException(status_code=400, detail=f"Unsupported action: {action}")
 
 def host_get_clipboard() -> str:
-    """Reads clipboard from Windows host with retry."""
+    """Reads text from Windows host clipboard with retry."""
     for _ in range(3):
         try:
             import pyperclip
@@ -670,7 +670,7 @@ def host_get_clipboard() -> str:
     return ""
 
 def host_set_clipboard(text: str) -> bool:
-    """Writes clipboard to Windows host with retry."""
+    """Writes text to Windows host clipboard with retry."""
     for _ in range(3):
         try:
             import pyperclip
@@ -680,21 +680,87 @@ def host_set_clipboard(text: str) -> bool:
             time.sleep(0.05)
     return False
 
+def host_get_clipboard_image() -> Optional[Dict[str, Any]]:
+    """Checks if Windows host clipboard contains an image / screenshot and returns base64 png."""
+    try:
+        from PIL import ImageGrab
+        img = ImageGrab.grabclipboard()
+        if isinstance(img, Image.Image):
+            buffered = io.BytesIO()
+            img.save(buffered, format="PNG", optimize=True)
+            b64_data = base64.b64encode(buffered.getvalue()).decode('ascii')
+            return {
+                "has_image": True,
+                "data_url": f"data:image/png;base64,{b64_data}",
+                "width": img.width,
+                "height": img.height,
+                "size_bytes": buffered.tell()
+            }
+    except Exception as e:
+        print(f"[!] Clipboard Image Grab Exception: {e}")
+    return None
+
+def host_set_clipboard_image(img: Image.Image) -> bool:
+    """Copies PIL Image into Windows host clipboard in CF_DIB format."""
+    if sys.platform != 'win32':
+        return False
+    try:
+        output = io.BytesIO()
+        img.convert("RGB").save(output, "BMP")
+        data = output.getvalue()[14:] # Strip BMP 14-byte header for CF_DIB
+        output.close()
+
+        user32 = ctypes.windll.user32
+        kernel32 = ctypes.windll.kernel32
+
+        GMEM_MOVEABLE = 0x0002
+        CF_DIB = 8
+
+        kernel32.GlobalAlloc.restype = ctypes.c_void_p
+        kernel32.GlobalAlloc.argtypes = [ctypes.c_uint, ctypes.c_size_t]
+        kernel32.GlobalLock.restype = ctypes.c_void_p
+        kernel32.GlobalLock.argtypes = [ctypes.c_void_p]
+        kernel32.GlobalUnlock.argtypes = [ctypes.c_void_p]
+        user32.SetClipboardData.argtypes = [ctypes.c_uint, ctypes.c_void_p]
+
+        h_mem = kernel32.GlobalAlloc(GMEM_MOVEABLE, len(data))
+        if not h_mem:
+            return False
+        mem_ptr = kernel32.GlobalLock(h_mem)
+        if not mem_ptr:
+            return False
+        ctypes.memmove(mem_ptr, data, len(data))
+        kernel32.GlobalUnlock(h_mem)
+
+        user32.OpenClipboard(0)
+        user32.EmptyClipboard()
+        user32.SetClipboardData(CF_DIB, h_mem)
+        user32.CloseClipboard()
+        return True
+    except Exception as e:
+        print(f"[!] Set Clipboard Image Exception: {e}")
+        return False
+
 @app.get("/api/clipboard")
 async def get_clipboard_text(token: Optional[str] = Query(None), request: Request = None):
-    """Pulls host clipboard contents."""
+    """Pulls host clipboard contents (both text and screenshot/image if present)."""
     auth_header = request.headers.get("Authorization", "") if request else ""
     req_token = token or (auth_header.replace("Bearer ", "") if "Bearer " in auth_header else "")
     if not req_token or not verify_jwt_token(req_token):
         raise HTTPException(status_code=401, detail="Unauthorized")
 
     text = host_get_clipboard()
-    return {"text": text, "length": len(text)}
+    img_data = host_get_clipboard_image()
+    return {
+        "text": text,
+        "length": len(text),
+        "image": img_data
+    }
 
 @app.post("/api/clipboard")
 async def set_clipboard_text(payload: Dict[str, Any], request: Request):
     """
-    Pushes text into host clipboard.
+    Pushes text or screenshot/image into host clipboard.
     If 'paste_now' is True, simulates Ctrl+V into active host window.
     """
     auth_header = request.headers.get("Authorization", "")
@@ -702,9 +768,38 @@ async def set_clipboard_text(payload: Dict[str, Any], request: Request):
     if not token or not verify_jwt_token(token):
         raise HTTPException(status_code=401, detail="Unauthorized")
 
-    text = payload.get("text", "")
     paste_now = bool(payload.get("paste_now", False))
+    image_data_url = payload.get("image_data")
 
+    # Image / Screenshot payload
+    if image_data_url:
+        try:
+            if "," in image_data_url:
+                b64_str = image_data_url.split(",", 1)[1]
+            else:
+                b64_str = image_data_url
+            img_bytes = base64.b64decode(b64_str)
+            img = Image.open(io.BytesIO(img_bytes))
+            success = host_set_clipboard_image(img)
+            if not success:
+                raise HTTPException(status_code=500, detail="Failed to write image to host clipboard")
+
+            if paste_now and pyautogui:
+                await asyncio.sleep(0.08)
+                pyautogui.hotkey('ctrl', 'v')
+
+            return {
+                "success": True,
+                "message": "Screenshot / image copied to host clipboard",
+                "pasted": paste_now,
+                "width": img.width,
+                "height": img.height
+            }
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Image processing error: {e}")
+
+    # Text payload
+    text = payload.get("text", "")
     success = host_set_clipboard(text)
     if not success:
         raise HTTPException(status_code=500, detail="Failed to write to host clipboard")
@@ -714,6 +809,32 @@ async def set_clipboard_text(payload: Dict[str, Any], request: Request):
         pyautogui.hotkey('ctrl', 'v')
 
     return {"success": True, "message": "Clipboard updated", "pasted": paste_now, "length": len(text)}
+
+@app.post("/api/clipboard/capture-screen")
+async def capture_screen_to_clipboard(request: Request):
+    """Captures desktop screenshot, puts it on PC clipboard, and returns it to phone."""
+    auth_header = request.headers.get("Authorization", "")
+    token = auth_header.replace("Bearer ", "") if "Bearer " in auth_header else ""
+    if not token or not verify_jwt_token(token):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    try:
+        from PIL import ImageGrab
+        img = ImageGrab.grab()
+        host_set_clipboard_image(img)
+
+        buffered = io.BytesIO()
+        img.save(buffered, format="PNG", optimize=True)
+        b64_data = base64.b64encode(buffered.getvalue()).decode('ascii')
+        return {
+            "success": True,
+            "has_image": True,
+            "data_url": f"data:image/png;base64,{b64_data}",
+            "width": img.width,
+            "height": img.height
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/power/wol")
 async def trigger_wol_broadcast(payload: Dict[str, Any], request: Request):

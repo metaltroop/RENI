@@ -9,7 +9,7 @@
   <title>RENIC // Remote System Access</title>
   
   <link rel="manifest" href="/manifest.json">
-  <link rel="stylesheet" href="/style.css?v=2.3">
+  <link rel="stylesheet" href="/style.css?v=2.4">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;800&family=Orbitron:wght@600;800;900&family=Rajdhani:wght@500;600;700&display=swap" rel="stylesheet">
@@ -41,22 +41,28 @@
           <div class="status-pulse" id="connection-status" title="Connection Status"></div>
         </div>
 
-        <!-- Mini Telemetry HUD -->
+        <!-- Mini Telemetry HUD: Compact Circular Progress Gauges with % in center -->
         <div id="telemetry-hud" class="telemetry-hud">
-          <div class="hud-gauge" id="hud-cpu" title="Host CPU Load">
-            <span class="gauge-label">CPU</span>
-            <div class="gauge-track">
-              <div class="gauge-fill" id="cpu-fill" style="width: 0%"></div>
+          <div class="hud-circle-meter" id="hud-cpu" title="Host CPU Load">
+            <svg class="meter-svg" viewBox="0 0 36 36">
+              <path class="meter-bg" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+              <path id="cpu-circle-fill" class="meter-bar cpu-bar" stroke-dasharray="0, 100" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+            </svg>
+            <div class="meter-core">
+              <span class="meter-tag">CPU</span>
+              <span id="cpu-val" class="meter-val">0%</span>
             </div>
-            <span class="gauge-value" id="cpu-val">0%</span>
           </div>
 
-          <div class="hud-gauge" id="hud-ram" title="Host Memory Usage">
-            <span class="gauge-label">RAM</span>
-            <div class="gauge-track">
-              <div class="gauge-fill" id="ram-fill" style="width: 0%"></div>
+          <div class="hud-circle-meter" id="hud-ram" title="Host Memory Usage">
+            <svg class="meter-svg" viewBox="0 0 36 36">
+              <path class="meter-bg" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+              <path id="ram-circle-fill" class="meter-bar ram-bar" stroke-dasharray="0, 100" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+            </svg>
+            <div class="meter-core">
+              <span class="meter-tag">RAM</span>
+              <span id="ram-val" class="meter-val">0%</span>
             </div>
-            <span class="gauge-value" id="ram-val">0%</span>
           </div>
 
           <div class="hud-battery" id="hud-battery" title="Battery & Power">
@@ -346,49 +352,113 @@
         </div>
 
         <div class="modal-body">
-          <!-- 1-Tap Quick Action Deck -->
-          <div class="clip-quick-grid">
-            <button id="btn-clip-phone-to-pc" class="clip-action-btn btn-send-pc" title="Send Phone Clipboard to PC">
-              <span class="clip-btn-icon">📲 ➔ 💻</span>
-              <span class="clip-btn-label">Phone ➔ PC</span>
-              <span class="clip-btn-sub">Send phone clipboard</span>
-            </button>
-            <button id="btn-clip-pc-to-phone" class="clip-action-btn btn-pull-phone" title="Copy PC Clipboard to Phone">
-              <span class="clip-btn-icon">💻 ➔ 📲</span>
-              <span class="clip-btn-label">PC ➔ Phone</span>
-              <span class="clip-btn-sub">Copy PC to phone</span>
-            </button>
+          <!-- Tab Navigation: Text vs Screenshot/Image -->
+          <div class="clip-tab-bar">
+            <button id="tab-clip-text" class="clip-tab-btn active">📝 Text Sync</button>
+            <button id="tab-clip-img" class="clip-tab-btn">📸 Screenshots & Images</button>
           </div>
 
-          <!-- Instant Active Window Injection -->
-          <button id="btn-clip-paste-active" class="clip-direct-inject-btn" title="Paste directly into the currently focused window on PC">
-            <span class="inject-icon">⚡</span>
-            <div class="inject-text">
-              <strong>Paste Directly into Active PC Window</strong>
-              <span>Sends text & triggers Ctrl+V immediately</span>
+          <!-- TAB 1: TEXT SYNC PANE -->
+          <div id="clip-pane-text" class="clip-pane active">
+            <!-- 1-Tap Quick Action Deck -->
+            <div class="clip-quick-grid">
+              <button id="btn-clip-phone-to-pc" class="clip-action-btn btn-send-pc" title="Send Phone Clipboard to PC">
+                <span class="clip-btn-icon">📲 ➔ 💻</span>
+                <span class="clip-btn-label">Phone ➔ PC</span>
+                <span class="clip-btn-sub">Send phone clipboard</span>
+              </button>
+              <button id="btn-clip-pc-to-phone" class="clip-action-btn btn-pull-phone" title="Copy PC Clipboard to Phone">
+                <span class="clip-btn-icon">💻 ➔ 📲</span>
+                <span class="clip-btn-label">PC ➔ Phone</span>
+                <span class="clip-btn-sub">Copy PC to phone</span>
+              </button>
             </div>
-          </button>
 
-          <!-- Text Preview & Editor Area -->
-          <div class="clip-editor-wrapper">
-            <div class="clip-editor-header">
-              <span class="editor-label">CLIPBOARD CONTENT PREVIEW</span>
-              <span id="clip-char-count" class="char-count">0 chars</span>
+            <!-- Instant Active Window Injection -->
+            <button id="btn-clip-paste-active" class="clip-direct-inject-btn" title="Paste directly into the currently focused window on PC">
+              <span class="inject-icon">⚡</span>
+              <div class="inject-text">
+                <strong>Paste Directly into Active PC Window</strong>
+                <span>Sends text & triggers Ctrl+V immediately</span>
+              </div>
+            </button>
+
+            <!-- Text Preview & Editor Area -->
+            <div class="clip-editor-wrapper">
+              <div class="clip-editor-header">
+                <span class="editor-label">CLIPBOARD CONTENT PREVIEW</span>
+                <span id="clip-char-count" class="char-count">0 chars</span>
+              </div>
+              <textarea id="clipboard-textarea" placeholder="Paste or type text here to share between phone and PC..."></textarea>
             </div>
-            <textarea id="clipboard-textarea" placeholder="Paste or type text here to share between phone and PC..."></textarea>
+
+            <!-- Manual / Textarea Actions -->
+            <div class="clip-footer-actions">
+              <button id="btn-clip-copy-local" class="reni-btn btn-secondary btn-sm-flex" title="Copy text to phone system clipboard">
+                <span>📋 Copy to Phone</span>
+              </button>
+              <button id="btn-clip-push-custom" class="reni-btn btn-primary btn-sm-flex" title="Send text from box to PC">
+                <span>🖥️ Push to PC</span>
+              </button>
+              <button id="btn-clip-clear" class="reni-btn btn-danger btn-sm-flex" title="Clear text">
+                <span>✕</span>
+              </button>
+            </div>
           </div>
 
-          <!-- Manual / Textarea Actions -->
-          <div class="clip-footer-actions">
-            <button id="btn-clip-copy-local" class="reni-btn btn-secondary btn-sm-flex" title="Copy text to phone system clipboard">
-              <span>📋 Copy to Phone</span>
+          <!-- TAB 2: SCREENSHOTS & IMAGES PANE -->
+          <div id="clip-pane-img" class="clip-pane hidden">
+            <!-- Screenshot Quick Actions -->
+            <div class="clip-quick-grid">
+              <button id="btn-clip-snap-pc" class="clip-action-btn btn-pull-phone" title="Capture fresh screenshot of host PC desktop">
+                <span class="clip-btn-icon">📸 ➔ 📲</span>
+                <span class="clip-btn-label">Grab PC Screenshot</span>
+                <span class="clip-btn-sub">Capture desktop now</span>
+              </button>
+              <button id="btn-clip-pick-img" class="clip-action-btn btn-send-pc" title="Upload or pick phone screenshot/image">
+                <span class="clip-btn-icon">🖼️ ➔ 💻</span>
+                <span class="clip-btn-label">Pick Phone Image</span>
+                <span class="clip-btn-sub">From gallery/camera</span>
+              </button>
+            </div>
+            <input type="file" id="clip-file-input" accept="image/*" style="display:none;">
+
+            <!-- Instant Image Paste into Active Window -->
+            <button id="btn-clip-paste-img-active" class="clip-direct-inject-btn" title="Push current image into PC clipboard and trigger Ctrl+V">
+              <span class="inject-icon">⚡</span>
+              <div class="inject-text">
+                <strong>Paste Image into Active PC Window</strong>
+                <span>Sends image & triggers Ctrl+V immediately</span>
+              </div>
             </button>
-            <button id="btn-clip-push-custom" class="reni-btn btn-primary btn-sm-flex" title="Send text from box to PC">
-              <span>🖥️ Push to PC</span>
-            </button>
-            <button id="btn-clip-clear" class="reni-btn btn-danger btn-sm-flex" title="Clear text">
-              <span>✕</span>
-            </button>
+
+            <!-- Image Preview Box -->
+            <div id="clip-img-card" class="clip-img-card hidden">
+              <div class="clip-img-frame">
+                <img id="clip-img-preview" alt="Clipboard Screenshot Preview">
+              </div>
+              <div class="clip-img-meta-row">
+                <span id="clip-img-dims" class="img-meta-tag">1920 × 1080</span>
+                <span id="clip-img-size" class="img-meta-tag">PNG</span>
+              </div>
+              <div class="clip-footer-actions">
+                <button id="btn-clip-download-img" class="reni-btn btn-secondary btn-sm-flex" title="Save image file to phone">
+                  <span>📥 Save Image</span>
+                </button>
+                <button id="btn-clip-copy-img" class="reni-btn btn-secondary btn-sm-flex" title="Copy image to phone clipboard">
+                  <span>📋 Copy Image</span>
+                </button>
+                <button id="btn-clip-push-img" class="reni-btn btn-primary btn-sm-flex" title="Push image to PC clipboard">
+                  <span>🖥️ Push to PC</span>
+                </button>
+              </div>
+            </div>
+
+            <!-- Empty Image Placeholder -->
+            <div id="clip-img-empty" class="clip-img-empty">
+              <span class="empty-icon">🖼️</span>
+              <p>No screenshot detected on clipboard.<br>Tap <strong>"Grab PC Screenshot"</strong> or <strong>"Pick Phone Image"</strong>.</p>
+            </div>
           </div>
         </div>
       </div>
@@ -462,6 +532,6 @@
     <div id="nitro-toast" class="toast hidden"></div>
   </div>
 
-  <script src="/app.js?v=2.3"></script>
+  <script src="/app.js?v=2.4"></script>
 </body>
 </html>

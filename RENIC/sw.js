@@ -1,10 +1,10 @@
-// RENI Service Worker (Mobile PWA v2.3)
-const CACHE_NAME = 'reni-pwa-v2.3';
+// RENI Service Worker (Mobile PWA v2.4)
+const CACHE_NAME = 'reni-pwa-v2.4';
 const ASSETS_TO_PRECACHE = [
   '/',
-  '/index.html?v=2.3',
-  '/style.css?v=2.3',
-  '/app.js?v=2.3',
+  '/index.html?v=2.4',
+  '/style.css?v=2.4',
+  '/app.js?v=2.4',
   '/manifest.json'
 ];
 
