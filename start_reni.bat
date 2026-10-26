@@ -2,70 +2,54 @@
 chcp 65001 >nul
 setlocal
 
-title RENI // HOST SERVER AND TUNNEL LAUNCHER
-echo ==============================================================================
-echo   R.E.N.I.S. // LAUNCHING REMOTE ACCESS SYSTEM AND TUNNEL
-echo ==============================================================================
-
-:: Check for Administrative Elevation and re-run as admin if needed
-net session >nul 2>&1
-if %errorLevel% neq 0 (
-    echo [!] Requesting elevated administrator execution...
-    powershell -Command "Start-Process cmd -ArgumentList '/c \"\"%~f0\"\"' -Verb RunAs"
-    exit /b
-)
-
+:: Always change directory to project root immediately
 cd /d "%~dp0"
 
-:: 1. Detect and auto-launch Cloudflare Tunnel if installed
-set "CLOUDFLARED_BIN="
-if exist "C:\Program Files (x86)\cloudflared\cloudflared.exe" (
-    set "CLOUDFLARED_BIN=C:\Program Files (x86)\cloudflared\cloudflared.exe"
-) else if exist "C:\Program Files\cloudflared\cloudflared.exe" (
-    set "CLOUDFLARED_BIN=C:\Program Files\cloudflared\cloudflared.exe"
+title RENI // HOST SYSTEM CONTROL CENTER (v3.0)
+echo ==============================================================================
+echo   R.E.N.I.S. // HOST CONTROL CENTER AND UNIVERSAL TUNNEL MANAGER (v3.0)
+echo ==============================================================================
+
+:: Check elevation status (informational; standard user works out of the box)
+net session >nul 2>&1
+if %errorLevel% equ 0 (
+    echo [+] Running with Administrator privileges.
 ) else (
-    where.exe cloudflared.exe >nul 2>&1
-    if %errorLevel% equ 0 set "CLOUDFLARED_BIN=cloudflared"
+    echo [*] Running in Standard User mode.
 )
 
-if defined CLOUDFLARED_BIN (
-    echo [*] Checking for and terminating any prior RENI tunnel...
-    powershell -NoProfile -Command "Get-CimInstance Win32_Process -Filter 'Name = ''cloudflared.exe''' | Where-Object { $_.CommandLine -like '* reni*' -or $_.CommandLine -like '*8765*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force; Write-Host ('[+] Terminated previous RENI tunnel (PID ' + $_.ProcessId + ')') }"
-    echo [*] Launching fresh RENI Cloudflare Tunnel in background...
-    start "RENI Cloudflare Tunnel" /MIN "%CLOUDFLARED_BIN%" tunnel run --url http://127.0.0.1:8765 reni
-    echo [+] RENI Cloudflare Tunnel started (bound to IPv4 http://127.0.0.1:8765).
-)
-
-:: 2. Check for Python virtual environment in RENIS\venv and launch GUI or CLI
+:: Check for CLI flag
 set "TARGET_SCRIPT=RENIS\renis_gui.py"
 if "%~1"=="--cli" (
-    echo [*] CLI mode requested. Launching raw terminal server...
+    echo [*] CLI mode requested. Launching terminal server...
     set "TARGET_SCRIPT=RENIS\renis_server.py"
 ) else (
     echo [*] Launching RENI Desktop GUI Control Center...
 )
 
-if exist "RENIS\venv\Scripts\activate.bat" (
-    echo [*] Activating Python environment from .\RENIS\venv...
-    call "RENIS\venv\Scripts\activate.bat"
-    python "%TARGET_SCRIPT%"
+:: Locate Python executable
+set "PYTHON_EXE="
+if exist "RENIS\venv\Scripts\python.exe" (
+    set "PYTHON_EXE=RENIS\venv\Scripts\python.exe"
 ) else (
-    echo [!] Virtual environment not found at .\RENIS\venv.
-    echo [*] Falling back to system Python...
-    python "%TARGET_SCRIPT%"
+    where.exe python.exe >nul 2>&1
+    if %errorLevel% equ 0 set "PYTHON_EXE=python"
 )
+
+if not defined PYTHON_EXE (
+    echo.
+    echo [-] Python executable not found in .\RENIS\venv or system PATH!
+    echo [*] Please run setup_renis_admin.bat first to configure the environment.
+    pause
+    exit /b 1
+)
+
+:: Launch the target application
+"%PYTHON_EXE%" "%TARGET_SCRIPT%" %*
 
 if %errorLevel% neq 0 (
     echo.
-    echo [-] RENIS process terminated unexpectedly with exit code %errorLevel%.
-    echo [*] If dependencies are missing, run setup_renis_admin.bat first.
+    echo [-] RENI application exited with code %errorLevel%.
+    echo [*] Check logs above or run setup_renis_admin.bat if dependencies are missing.
     pause
 )
-
-:: 3. Clean up RENI tunnel on shutdown
-if defined CLOUDFLARED_BIN (
-    echo.
-    echo [*] Stopping RENI Cloudflare Tunnel...
-    powershell -NoProfile -Command "Get-CimInstance Win32_Process -Filter 'Name = ''cloudflared.exe''' | Where-Object { $_.CommandLine -like '* reni*' -or $_.CommandLine -like '*8765*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }" >nul 2>&1
-)
-
