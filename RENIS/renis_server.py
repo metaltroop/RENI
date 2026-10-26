@@ -16,6 +16,14 @@ SERVER_DIR = Path(__file__).resolve().parent
 if str(SERVER_DIR) not in sys.path:
     sys.path.insert(0, str(SERVER_DIR))
 
+# Ensure Windows console uses UTF-8 encoding
+if sys.platform == "win32":
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 import io
 import time
 import json
@@ -143,6 +151,30 @@ def get_discovered_ips() -> List[str]:
             pass
 
     return lan_ips + tailscale_ips
+
+def get_configured_tunnel_url() -> Optional[str]:
+    """Returns the configured public Cloudflare Tunnel URL if available."""
+    env_url = os.getenv("RENIS_TUNNEL_URL") or os.getenv("CLOUDFLARE_TUNNEL_URL")
+    if env_url:
+        return env_url.strip().rstrip('/')
+
+    saved_url = AUTH_DATA.get("tunnel_url")
+    if saved_url:
+        return saved_url.strip().rstrip('/')
+
+    for cred in AUTH_DATA.get("webauthn_credentials", []):
+        client_data = cred.get("client_data", "")
+        if client_data:
+            try:
+                decoded = safe_b64url_decode(client_data).decode('utf-8')
+                cdata = json.loads(decoded)
+                origin = cdata.get("origin", "")
+                if origin and origin.startswith("https://") and "localhost" not in origin:
+                    return origin.strip().rstrip('/')
+            except Exception:
+                pass
+
+    return None
 
 # ==============================================================================
 # UAC ELEVATION CHECK & AUTO-RESTART
@@ -347,6 +379,7 @@ async def get_server_status(request: Request):
         raise HTTPException(status_code=403, detail="Forbidden: Restricted endpoint.")
     mem = psutil.virtual_memory()
     ips = get_discovered_ips()
+    tunnel_url = get_configured_tunnel_url()
     return {
         "active_streams": len(ACTIVE_STREAMS),
         "active_controls": len(ACTIVE_CONTROLS),
@@ -357,6 +390,7 @@ async def get_server_status(request: Request):
         "ram_used_gb": round(mem.used / (1024**3), 2),
         "ram_total_gb": round(mem.total / (1024**3), 2),
         "discovered_ips": ips,
+        "tunnel_url": tunnel_url,
         "port": PORT,
         "has_biometrics": len(AUTH_DATA.get("webauthn_credentials", [])) > 0,
         "keep_awake": KEEP_AWAKE_ACTIVE
@@ -991,7 +1025,7 @@ async def websocket_stream(websocket: WebSocket, token: Optional[str] = Query(No
         return
 
     try:
-        with mss.mss() as sct:
+        with mss.MSS() as sct:
             monitor = sct.monitors[1] if len(sct.monitors) > 1 else sct.monitors[0]
             mon_left = monitor.get("left", 0)
             mon_top = monitor.get("top", 0)
@@ -1328,13 +1362,21 @@ async def serve_root_pwa_files(filename: str):
 # MAIN ENTRYPOINT
 # ==============================================================================
 def main():
-    print(RENI_BANNER)
+    try:
+        print(RENI_BANNER)
+    except Exception:
+        print("==================================================")
+        print("  R.E.N.I. // REMOTE SYSTEM CONTROL SERVER        ")
+        print("==================================================")
     check_and_elevate()
 
     discovered_ips = get_discovered_ips()
+    tunnel_url = get_configured_tunnel_url()
 
     print(f"[*] Host Machine: {socket.gethostname()} (Windows NT Elevated)")
     print(f"[*] Host Dashboard: http://localhost:{PORT}/dashboard")
+    if tunnel_url:
+        print(f"[+] Connect Phone (Cloudflare Tunnel): {tunnel_url}")
     for ip in discovered_ips:
         label = "Tailscale VPN" if ip.startswith("100.") else "Local Wi-Fi"
         print(f"[+] Connect Phone ({label}): http://{ip}:{PORT}")

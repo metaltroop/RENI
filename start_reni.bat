@@ -1,4 +1,5 @@
 @echo off
+chcp 65001 >nul
 setlocal
 
 title RENI // HOST SERVER AND TUNNEL LAUNCHER
@@ -31,8 +32,8 @@ if defined CLOUDFLARED_BIN (
     echo [*] Checking for and terminating any prior RENI tunnel...
     powershell -NoProfile -Command "Get-CimInstance Win32_Process -Filter 'Name = ''cloudflared.exe''' | Where-Object { $_.CommandLine -like '* reni*' -or $_.CommandLine -like '*8765*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force; Write-Host ('[+] Terminated previous RENI tunnel (PID ' + $_.ProcessId + ')') }"
     echo [*] Launching fresh RENI Cloudflare Tunnel in background...
-    start "RENI Cloudflare Tunnel" /MIN "%CLOUDFLARED_BIN%" tunnel run --url http://localhost:8765 reni
-    echo [+] RENI Cloudflare Tunnel started in background.
+    start "RENI Cloudflare Tunnel" /MIN "%CLOUDFLARED_BIN%" tunnel run --url http://127.0.0.1:8765 reni
+    echo [+] RENI Cloudflare Tunnel started (bound to IPv4 http://127.0.0.1:8765).
 )
 
 :: 2. Check for Python virtual environment in RENIS\venv and launch server

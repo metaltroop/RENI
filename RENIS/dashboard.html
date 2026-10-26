@@ -489,22 +489,35 @@
         dom.metricControls.textContent = data.active_controls;
 
         // Discovered URLs setup once
-        if (discoveredUrls.length === 0 && data.discovered_ips && data.discovered_ips.length > 0) {
-          discoveredUrls = data.discovered_ips.map(ip => `http://${ip}:${data.port}`);
-          dom.urlSelector.innerHTML = '';
-          discoveredUrls.forEach((u, idx) => {
-            const btn = document.createElement('button');
-            const isTailscale = u.includes('100.');
-            btn.className = 'url-tab ' + (idx === 0 ? 'active' : '');
-            btn.textContent = isTailscale ? '🌐 Tailscale VPN' : `📶 Local Wi-Fi (${data.discovered_ips[idx]})`;
-            btn.addEventListener('click', () => {
-              document.querySelectorAll('.url-tab').forEach(b => b.classList.remove('active'));
-              btn.classList.add('active');
-              renderQR(u);
+        if (discoveredUrls.length === 0) {
+          const urls = [];
+          if (data.tunnel_url) {
+            urls.push({ url: data.tunnel_url, label: '☁️ Cloudflare Tunnel' });
+          }
+          if (data.discovered_ips && data.discovered_ips.length > 0) {
+            data.discovered_ips.forEach((ip, idx) => {
+              const isTailscale = ip.startsWith('100.');
+              const label = isTailscale ? '🌐 Tailscale VPN' : `📶 Local Wi-Fi (${ip})`;
+              urls.push({ url: `http://${ip}:${data.port}`, label });
             });
-            dom.urlSelector.appendChild(btn);
-          });
-          renderQR(discoveredUrls[0]);
+          }
+
+          if (urls.length > 0) {
+            discoveredUrls = urls.map(u => u.url);
+            dom.urlSelector.innerHTML = '';
+            urls.forEach((item, idx) => {
+              const btn = document.createElement('button');
+              btn.className = 'url-tab ' + (idx === 0 ? 'active' : '');
+              btn.textContent = item.label;
+              btn.addEventListener('click', () => {
+                document.querySelectorAll('.url-tab').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                renderQR(item.url);
+              });
+              dom.urlSelector.appendChild(btn);
+            });
+            renderQR(urls[0].url);
+          }
         }
       } catch (err) {}
     }
