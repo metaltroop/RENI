@@ -1,6 +1,6 @@
 {
-  "name": "RENI - Remote Nitro",
-  "short_name": "RENI",
+  "name": "RENIC - Remote System Access",
+  "short_name": "RENIC",
   "description": "High-Performance Remote Desktop & Admin Control System",
   "start_url": "/",
   "display": "standalone",

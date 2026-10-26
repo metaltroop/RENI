@@ -171,9 +171,11 @@
       justify-content: center;
     }
 
-    .qr-box svg, .qr-box canvas {
+    .qr-box svg, .qr-box canvas, .qr-box img {
       width: 100%;
       height: 100%;
+      object-fit: contain;
+      border-radius: 4px;
     }
 
     .url-selector {
@@ -430,84 +432,21 @@
 
   <div id="toast" class="toast hidden"></div>
 
-  <!-- Ultra-lightweight inline QR Code generator (qrious standalone) -->
-  <script>
-    /*! QRious v4.0.2 | GPLv3 | (c) 2017 Alasdair Mercer */
-    (function(e,t){"object"==typeof exports&&"undefined"!=typeof module?module.exports=t():"function"==typeof define&&define.amd?define(t):e.QRious=t()})(this,function(){"use strict";function e(e,t){var n;return"function"==typeof Object.create?n=Object.create(e):(r.prototype=e,n=new r),t&&i(!0,n,t),n}function t(t,n,r){var i=this;return function(){var o=i[t],u=i[n],a=r.apply(i,arguments);return i[t]=o,i[n]=u,a}}function n(e){return"string"==typeof e}function r(){}function i(e,t){var r,u,a=arguments.length;if(e=Boolean(e),a<2)return t;for(r=2;r<a;r++)if(u=arguments[r])for(var f in u)o.call(u,f)&&(e&&n(u[f])?t[f]=u[f]:t[f]=u[f]);return t}var o=Object.prototype.hasOwnProperty;function u(e,t,n){var r,i,o=e.length;for(r=0;r<o;r++)if(i=e[r],t.call(n,i,r,e))return i}function a(e,t,n){var r,i,o=e.length;for(r=0;r<o;r++)i=e[r],t.call(n,i,r,e)}function f(e,t,n){var r,i,o=e.length,u=[];for(r=0;r<o;r++)i=e[r],t.call(n,i,r,e)&&u.push(i);return u}function c(e,t,n){var r,i,o=e.length,u=[];for(r=0;r<o;r++)i=e[r],u.push(t.call(n,i,r,e));return u}function s(e){for(var t=e.length,n=[];t--;)n[t]=0;return n}function l(e){for(var t=0,n=0,r=e.length;n<r;n++)t=(t<<8|e[n])%285;return t}
-    // Minimal standard QR canvas renderer
-    function generateQRCanvas(text, size) {
-      var canvas = document.createElement('canvas');
-      canvas.width = size;
-      canvas.height = size;
-      var ctx = canvas.getContext('2d');
-      ctx.fillStyle = '#FFFFFF';
-      ctx.fillRect(0, 0, size, size);
-      
-      // Basic visual matrix encoder fallback for 100% offline generation
-      var s = text.length;
-      var grid = 25;
-      var cell = size / grid;
-      ctx.fillStyle = '#0B0C10';
-      
-      // Position patterns
-      function drawPos(x, y) {
-        ctx.fillRect(x*cell, y*cell, 7*cell, 7*cell);
-        ctx.fillStyle = '#FFFFFF';
-        ctx.fillRect((x+1)*cell, (y+1)*cell, 5*cell, 5*cell);
-        ctx.fillStyle = '#0B0C10';
-        ctx.fillRect((x+2)*cell, (y+2)*cell, 3*cell, 3*cell);
-      }
-      drawPos(1, 1);
-      drawPos(grid - 8, 1);
-      drawPos(1, grid - 8);
-
-      // Deterministic data hash pattern
-      var hash = 0;
-      for (var i = 0; i < text.length; i++) hash = ((hash << 5) - hash) + text.charCodeAt(i);
-      for (var r = 0; r < grid; r++) {
-        for (var c = 0; c < grid; c++) {
-          if ((r < 8 && (c < 8 || c >= grid - 8)) || (r >= grid - 8 && c < 8)) continue;
-          var bit = ((hash ^ (r * 31 + c * 17)) + (text.charCodeAt((r+c)%text.length) || 0)) % 2;
-          if (bit === 0) ctx.fillRect(c * cell, r * cell, cell - 0.5, cell - 0.5);
-        }
-      }
-      return canvas;
-    }
-    window.generateQRCanvas = generateQRCanvas;
-  </script>
-
-  <script>
-    const dom = {
-      urlSelector: document.getElementById('url-selector'),
-      qrTarget: document.getElementById('qr-target'),
-      activeUrl: document.getElementById('active-url'),
-      btnCopyUrl: document.getElementById('btn-copy-url'),
-      metricCpu: document.getElementById('metric-cpu'),
-      metricCpuSub: document.getElementById('metric-cpu-sub'),
-      metricRam: document.getElementById('metric-ram'),
-      metricRamSub: document.getElementById('metric-ram-sub'),
-      metricStreams: document.getElementById('metric-streams'),
-      metricControls: document.getElementById('metric-controls'),
-      btnPowercfgLid: document.getElementById('btn-powercfg-lid'),
-      btnKillSessions: document.getElementById('btn-kill-sessions'),
-      toast: document.getElementById('toast')
-    };
-
-    let discoveredUrls = [];
-    let currentUrl = '';
-
-    function showToast(msg) {
-      dom.toast.textContent = msg;
-      dom.toast.classList.remove('hidden');
-      setTimeout(() => dom.toast.classList.add('hidden'), 2500);
-    }
-
     function renderQR(url) {
       currentUrl = url;
       dom.activeUrl.textContent = url;
       dom.qrTarget.innerHTML = '';
-      const cvs = window.generateQRCanvas(url, 180);
-      dom.qrTarget.appendChild(cvs);
+
+      const img = document.createElement('img');
+      img.alt = 'Scan QR code to connect';
+      img.src = '/api/server/qr?url=' + encodeURIComponent(url);
+      img.onerror = function() {
+        this.onerror = function() {
+          dom.qrTarget.innerHTML = '<div style="font-size:11px;color:#0B0C10;text-align:center;padding:12px;font-family:monospace;word-break:break-all;">Connect directly to:<br><b>' + url + '</b></div>';
+        };
+        this.src = 'https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=' + encodeURIComponent(url);
+      };
+      dom.qrTarget.appendChild(img);
     }
 
     async function pollStatus() {

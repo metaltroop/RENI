@@ -53,8 +53,14 @@ except ImportError:
 from PIL import Image, ImageDraw
 import psutil
 import jwt
+from urllib.parse import quote
+try:
+    import qrcode
+except ImportError:
+    qrcode = None
+
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends, Query, status, Request
-from fastapi.responses import HTMLResponse, FileResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, FileResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
@@ -295,16 +301,50 @@ KEEP_AWAKE_ACTIVE = False
 # ==============================================================================
 # REST API: SERVER MANAGEMENT & DASHBOARD
 # ==============================================================================
+def verify_local_or_auth(request: Request) -> bool:
+    """
+    Validates that the request originates directly from the host machine on localhost
+    (and NOT through Cloudflare Tunnel or reverse proxies), OR that the request includes
+    a valid authenticated JWT token in Authorization header or 'token' query parameter.
+    """
+    is_proxied = bool(request.headers.get("cf-connecting-ip") or request.headers.get("x-forwarded-for"))
+    hostname = request.url.hostname or ""
+    client_host = request.client.host if request.client else ""
+
+    # Strictly direct localhost access (not proxied over internet / tunnel)
+    if not is_proxied and (hostname in ["localhost", "127.0.0.1", "::1"] or client_host in ["127.0.0.1", "::1"]):
+        return True
+
+    # Check for Bearer token in Authorization header or ?token= query parameter
+    auth_header = request.headers.get("Authorization", "")
+    token = ""
+    if "Bearer " in auth_header:
+        token = auth_header.replace("Bearer ", "").strip()
+    elif "token" in request.query_params:
+        token = request.query_params.get("token", "").strip()
+
+    if token and verify_jwt_token(token):
+        return True
+
+    return False
+
 @app.get("/dashboard")
-async def serve_dashboard():
-    """Serves the host control panel dashboard."""
+async def serve_dashboard(request: Request):
+    """Serves the host control panel dashboard, locked to local host or authenticated users."""
+    if not verify_local_or_auth(request):
+        raise HTTPException(
+            status_code=403,
+            detail="Forbidden: Host dashboard is restricted to local host access or authorized sessions."
+        )
     if DASHBOARD_FILE.exists():
         return FileResponse(DASHBOARD_FILE)
     return HTMLResponse("<h2>RENI - Dashboard file not found</h2>", status_code=404)
 
 @app.get("/api/server/status")
-async def get_server_status():
+async def get_server_status(request: Request):
     """Returns live server metrics, IP addresses, and active connection counts."""
+    if not verify_local_or_auth(request):
+        raise HTTPException(status_code=403, detail="Forbidden: Restricted endpoint.")
     mem = psutil.virtual_memory()
     ips = get_discovered_ips()
     return {
@@ -322,9 +362,45 @@ async def get_server_status():
         "keep_awake": KEEP_AWAKE_ACTIVE
     }
 
+@app.get("/api/server/qr")
+async def get_server_qr(request: Request, url: str = Query(..., description="Target URL for QR code")):
+    """
+    Generates a 100% real scannable QR code PNG image for the target URL.
+    Protected by verify_local_or_auth.
+    """
+    if not verify_local_or_auth(request):
+        raise HTTPException(status_code=403, detail="Forbidden: Unauthorized access to host QR generator.")
+
+    if not url:
+        raise HTTPException(status_code=400, detail="Missing url query parameter")
+
+    if qrcode is not None:
+        try:
+            qr = qrcode.QRCode(
+                version=None,
+                error_correction=qrcode.constants.ERROR_CORRECT_M,
+                box_size=8,
+                border=2,
+            )
+            qr.add_data(url)
+            qr.make(fit=True)
+            img = qr.make_image(fill_color="#0B0C10", back_color="#FFFFFF")
+            buf = io.BytesIO()
+            img.save(buf, format="PNG")
+            return Response(content=buf.getvalue(), media_type="image/png")
+        except Exception as e:
+            print(f"[!] Error generating QR code with local qrcode engine: {e}")
+            fallback_url = f"https://api.qrserver.com/v1/create-qr-code/?size=200x200&data={quote(url)}"
+            return RedirectResponse(fallback_url)
+    else:
+        fallback_url = f"https://api.qrserver.com/v1/create-qr-code/?size=200x200&data={quote(url)}"
+        return RedirectResponse(fallback_url)
+
 @app.post("/api/server/kill-sessions")
-async def kill_all_sessions():
+async def kill_all_sessions(request: Request):
     """Emergency kill-switch: closes all active remote WebSocket connections."""
+    if not verify_local_or_auth(request):
+        raise HTTPException(status_code=403, detail="Forbidden: Restricted endpoint.")
     count = 0
     all_sockets = list(ACTIVE_STREAMS) + list(ACTIVE_CONTROLS) + list(ACTIVE_TERMINALS)
     for ws in all_sockets:
@@ -339,8 +415,10 @@ async def kill_all_sessions():
     return {"success": True, "closed_sessions": count, "message": f"Closed {count} active remote sessions"}
 
 @app.post("/api/server/powercfg-lid")
-async def configure_powercfg_lid():
+async def configure_powercfg_lid(request: Request):
     """Configures Windows PowerCFG so closing lid on AC power does not sleep."""
+    if not verify_local_or_auth(request):
+        raise HTTPException(status_code=403, detail="Forbidden: Restricted endpoint.")
     if sys.platform == 'win32':
         try:
             os.system("powercfg /setacvalueindex SCHEME_CURRENT SUB_BUTTONS LIDACTION 0")
@@ -1212,12 +1290,12 @@ async def serve_index(request: Request):
     Serves the main PWA HTML file for remote users, or auto-redirects localhost
     to the host dashboard unless ?client=1 is requested.
     """
-    host_ip = request.client.host if request.client else ""
+    is_proxied = bool(request.headers.get("cf-connecting-ip") or request.headers.get("x-forwarded-for"))
     hostname = request.url.hostname or ""
 
-    if hostname in ["localhost", "127.0.0.1", "::1"] or host_ip in ["127.0.0.1", "::1"]:
-        if "client" not in request.query_params:
-            return RedirectResponse(url="/dashboard")
+    # ONLY redirect to /dashboard if NOT proxied, accessed strictly as localhost hostname, and not requesting ?client
+    if not is_proxied and hostname in ["localhost", "127.0.0.1", "::1"] and "client" not in request.query_params:
+        return RedirectResponse(url="/dashboard")
 
     index_file = CLIENT_DIR / "index.html"
     if index_file.exists():

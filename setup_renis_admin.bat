@@ -43,9 +43,9 @@ if %errorLevel% equ 0 (
 
 :: 4. Configure Windows Firewall Rule for Port 8765
 echo.
-echo [*] [STEP 3/5] Configuring Inbound Windows Firewall Rule for Port 8765...
 netsh advfirewall firewall delete rule name="RENI Nitro Server (Port 8765)" >nul 2>&1
-netsh advfirewall firewall add rule name="RENI Nitro Server (Port 8765)" dir=in action=allow protocol=TCP localport=8765 profile=any >nul 2>&1
+netsh advfirewall firewall delete rule name="RENI Remote Server (Port 8765)" >nul 2>&1
+netsh advfirewall firewall add rule name="RENI Remote Server (Port 8765)" dir=in action=allow protocol=TCP localport=8765 profile=any >nul 2>&1
 if %errorLevel% equ 0 (
     echo [+] Windows Firewall inbound TCP rule created on port 8765.
 ) else (
