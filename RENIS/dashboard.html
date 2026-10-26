@@ -387,6 +387,69 @@
         </div>
       </div>
 
+      <!-- Cloudflare Universal Tunnel Manager Card -->
+      <div class="card" id="card-tunnel">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <h2>☁️ UNIVERSAL CLOUDFLARE TUNNEL</h2>
+          <div class="status-badge" id="tunnel-status-badge" style="border-color: #8E92A0; color: #8E92A0; background: rgba(142,146,160,0.1);">
+            <div class="pulse-dot" id="tunnel-pulse-dot" style="background: #8E92A0; box-shadow: none;"></div>
+            <span id="tunnel-status-text">STOPPED</span>
+          </div>
+        </div>
+        <p style="font-size: 13px; color: var(--text-muted);">
+          Expose your desktop securely over HTTPS to your phone anywhere in the world.
+        </p>
+
+        <!-- Tunnel Mode Switcher -->
+        <div class="url-selector" style="margin-top: 4px;">
+          <button class="url-tab active" id="tab-mode-quick" type="button">⚡ Quick Free (TryCloudflare)</button>
+          <button class="url-tab" id="tab-mode-token" type="button">🔑 Account Token</button>
+          <button class="url-tab" id="tab-mode-named" type="button">🏷️ Named Tunnel</button>
+        </div>
+
+        <!-- Mode Specific Inputs -->
+        <div id="tunnel-inputs" style="display: flex; flex-direction: column; gap: 8px;">
+          <div id="group-mode-quick" style="font-size: 12px; color: var(--text-muted); background: #060709; padding: 10px; border-radius: 6px; border: 1px solid var(--border-subtle);">
+            ✨ <b>Zero Setup Required:</b> Generates a temporary public <code>*.trycloudflare.com</code> HTTPS link instantly. No Cloudflare account needed.
+          </div>
+          <div id="group-mode-token" style="display: none; flex-direction: column; gap: 6px;">
+            <label style="font-size: 11px; font-family: var(--font-mono); color: var(--text-muted);">CLOUDFLARE TUNNEL TOKEN:</label>
+            <input type="password" id="input-tunnel-token" placeholder="Paste eyJh..." style="background: #060709; border: 1px solid var(--border-subtle); color: #FFF; padding: 8px 12px; border-radius: 6px; font-family: var(--font-mono); font-size: 12px; width: 100%;">
+          </div>
+          <div id="group-mode-named" style="display: none; flex-direction: column; gap: 6px;">
+            <div style="display: flex; gap: 8px;">
+              <div style="flex: 1;">
+                <label style="font-size: 11px; font-family: var(--font-mono); color: var(--text-muted);">TUNNEL NAME:</label>
+                <input type="text" id="input-tunnel-name" value="reni" placeholder="reni" style="background: #060709; border: 1px solid var(--border-subtle); color: #FFF; padding: 8px 12px; border-radius: 6px; font-family: var(--font-mono); font-size: 12px; width: 100%;">
+              </div>
+              <div style="flex: 1.5;">
+                <label style="font-size: 11px; font-family: var(--font-mono); color: var(--text-muted);">PUBLIC DOMAIN URL (OPTIONAL):</label>
+                <input type="text" id="input-tunnel-url" placeholder="https://reni.yourdomain.com" style="background: #060709; border: 1px solid var(--border-subtle); color: #FFF; padding: 8px 12px; border-radius: 6px; font-family: var(--font-mono); font-size: 12px; width: 100%;">
+              </div>
+            </div>
+            <button class="btn btn-secondary" id="btn-tunnel-login" style="margin-top: 4px; font-size: 11px; align-self: flex-start;">
+              🔑 Authorize Account (cloudflared tunnel login)
+            </button>
+          </div>
+        </div>
+
+        <!-- Tunnel Live URL row -->
+        <div id="tunnel-live-box" style="display: none; flex-direction: column; gap: 6px;">
+          <label style="font-size: 11px; font-family: var(--font-mono); color: var(--accent-cyan);">ACTIVE PUBLIC TUNNEL URL:</label>
+          <div class="url-display-row">
+            <span class="url-text" id="tunnel-active-url" style="color: var(--accent-cyan); font-weight: bold;">Starting...</span>
+            <button class="btn btn-cyan" id="btn-copy-tunnel-url">COPY</button>
+          </div>
+        </div>
+
+        <!-- Tunnel Action Buttons -->
+        <div style="display: flex; gap: 10px; margin-top: 4px;">
+          <button class="btn btn-cyan" id="btn-tunnel-start" style="flex: 1;">🚀 Start Tunnel</button>
+          <button class="btn btn-danger" id="btn-tunnel-stop" style="flex: 1; display: none;">🛑 Stop Tunnel</button>
+          <button class="btn btn-secondary" id="btn-tunnel-install" style="display: none;">⬇️ Install cloudflared</button>
+        </div>
+      </div>
+
       <!-- Live Server Metrics & Active Clients -->
       <div class="card">
         <h2>📊 HOST TELEMETRY & SESSIONS</h2>
@@ -446,11 +509,33 @@
       metricControls: document.getElementById('metric-controls'),
       btnPowercfgLid: document.getElementById('btn-powercfg-lid'),
       btnKillSessions: document.getElementById('btn-kill-sessions'),
-      toast: document.getElementById('toast')
+      toast: document.getElementById('toast'),
+      // Tunnel elements
+      tunnelStatusBadge: document.getElementById('tunnel-status-badge'),
+      tunnelPulseDot: document.getElementById('tunnel-pulse-dot'),
+      tunnelStatusText: document.getElementById('tunnel-status-text'),
+      tabModeQuick: document.getElementById('tab-mode-quick'),
+      tabModeToken: document.getElementById('tab-mode-token'),
+      tabModeNamed: document.getElementById('tab-mode-named'),
+      groupModeQuick: document.getElementById('group-mode-quick'),
+      groupModeToken: document.getElementById('group-mode-token'),
+      groupModeNamed: document.getElementById('group-mode-named'),
+      inputTunnelToken: document.getElementById('input-tunnel-token'),
+      inputTunnelName: document.getElementById('input-tunnel-name'),
+      inputTunnelUrl: document.getElementById('input-tunnel-url'),
+      btnTunnelLogin: document.getElementById('btn-tunnel-login'),
+      tunnelLiveBox: document.getElementById('tunnel-live-box'),
+      tunnelActiveUrl: document.getElementById('tunnel-active-url'),
+      btnCopyTunnelUrl: document.getElementById('btn-copy-tunnel-url'),
+      btnTunnelStart: document.getElementById('btn-tunnel-start'),
+      btnTunnelStop: document.getElementById('btn-tunnel-stop'),
+      btnTunnelInstall: document.getElementById('btn-tunnel-install')
     };
 
     let discoveredUrls = [];
     let currentUrl = '';
+    let currentTunnelMode = 'quick';
+    let lastKnownTunnelUrl = '';
 
     function showToast(msg) {
       dom.toast.textContent = msg;
@@ -473,6 +558,159 @@
         this.src = 'https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=' + encodeURIComponent(url);
       };
       dom.qrTarget.appendChild(img);
+    }
+
+    function setTunnelMode(mode) {
+      currentTunnelMode = mode;
+      [dom.tabModeQuick, dom.tabModeToken, dom.tabModeNamed].forEach(t => t.classList.remove('active'));
+      dom.groupModeQuick.style.display = 'none';
+      dom.groupModeToken.style.display = 'none';
+      dom.groupModeNamed.style.display = 'none';
+
+      if (mode === 'quick') {
+        dom.tabModeQuick.classList.add('active');
+        dom.groupModeQuick.style.display = 'block';
+      } else if (mode === 'token') {
+        dom.tabModeToken.classList.add('active');
+        dom.groupModeToken.style.display = 'flex';
+      } else if (mode === 'named') {
+        dom.tabModeNamed.classList.add('active');
+        dom.groupModeNamed.style.display = 'flex';
+      }
+    }
+
+    dom.tabModeQuick.addEventListener('click', () => setTunnelMode('quick'));
+    dom.tabModeToken.addEventListener('click', () => setTunnelMode('token'));
+    dom.tabModeNamed.addEventListener('click', () => setTunnelMode('named'));
+
+    async function pollTunnelStatus() {
+      try {
+        const res = await fetch('/api/server/tunnel/status');
+        if (!res.ok) return;
+        const data = await res.json();
+
+        if (!data.installed) {
+          dom.btnTunnelInstall.style.display = 'inline-flex';
+        } else {
+          dom.btnTunnelInstall.style.display = 'none';
+        }
+
+        if (data.running) {
+          dom.tunnelStatusText.textContent = 'ONLINE';
+          dom.tunnelStatusBadge.style.borderColor = 'var(--accent-cyan)';
+          dom.tunnelStatusBadge.style.color = 'var(--accent-cyan)';
+          dom.tunnelStatusBadge.style.background = 'rgba(0,240,255,0.1)';
+          dom.tunnelPulseDot.style.background = 'var(--accent-cyan)';
+          dom.tunnelPulseDot.style.boxShadow = '0 0 8px var(--accent-cyan)';
+
+          dom.btnTunnelStart.style.display = 'none';
+          dom.btnTunnelStop.style.display = 'inline-flex';
+
+          if (data.url) {
+            dom.tunnelLiveBox.style.display = 'flex';
+            dom.tunnelActiveUrl.textContent = data.url;
+
+            // Automatically switch QR if tunnel url changed
+            if (data.url !== lastKnownTunnelUrl) {
+              lastKnownTunnelUrl = data.url;
+              renderQR(data.url);
+              // Rebuild URL selector tabs to prioritize active tunnel
+              discoveredUrls = [];
+            }
+          } else {
+            dom.tunnelLiveBox.style.display = 'flex';
+            dom.tunnelActiveUrl.textContent = 'Generating TryCloudflare link...';
+          }
+        } else {
+          dom.tunnelStatusText.textContent = 'STOPPED';
+          dom.tunnelStatusBadge.style.borderColor = '#8E92A0';
+          dom.tunnelStatusBadge.style.color = '#8E92A0';
+          dom.tunnelStatusBadge.style.background = 'rgba(142,146,160,0.1)';
+          dom.tunnelPulseDot.style.background = '#8E92A0';
+          dom.tunnelPulseDot.style.boxShadow = 'none';
+
+          dom.btnTunnelStart.style.display = 'inline-flex';
+          dom.btnTunnelStop.style.display = 'none';
+          dom.tunnelLiveBox.style.display = 'none';
+        }
+      } catch (err) {}
+    }
+
+    dom.btnTunnelStart.addEventListener('click', async () => {
+      dom.btnTunnelStart.disabled = true;
+      dom.btnTunnelStart.textContent = 'Starting...';
+      try {
+        const payload = {
+          mode: currentTunnelMode,
+          token: dom.inputTunnelToken.value.trim(),
+          name: dom.inputTunnelName.value.trim(),
+          url: dom.inputTunnelUrl.value.trim()
+        };
+        const res = await fetch('/api/server/tunnel/start', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        const d = await res.json();
+        showToast(d.message || (d.status === 'ok' ? 'Tunnel launching...' : 'Error starting tunnel'));
+        await pollTunnelStatus();
+      } catch (e) {
+        showToast('Error contacting server');
+      } finally {
+        dom.btnTunnelStart.disabled = false;
+        dom.btnTunnelStart.textContent = '🚀 Start Tunnel';
+      }
+    });
+
+    dom.btnTunnelStop.addEventListener('click', async () => {
+      dom.btnTunnelStop.disabled = true;
+      try {
+        const res = await fetch('/api/server/tunnel/stop', { method: 'POST' });
+        const d = await res.json();
+        showToast(d.message || 'Tunnel stopped');
+        await pollTunnelStatus();
+      } catch (e) {
+        showToast('Error stopping tunnel');
+      } finally {
+        dom.btnTunnelStop.disabled = false;
+      }
+    });
+
+    dom.btnTunnelInstall.addEventListener('click', async () => {
+      dom.btnTunnelInstall.disabled = true;
+      dom.btnTunnelInstall.textContent = 'Downloading...';
+      try {
+        const res = await fetch('/api/server/tunnel/install', { method: 'POST' });
+        const d = await res.json();
+        showToast(d.message || 'Installation completed');
+        await pollTunnelStatus();
+      } catch (e) {
+        showToast('Download failed');
+      } finally {
+        dom.btnTunnelInstall.disabled = false;
+        dom.btnTunnelInstall.textContent = '⬇️ Install cloudflared';
+      }
+    });
+
+    if (dom.btnTunnelLogin) {
+      dom.btnTunnelLogin.addEventListener('click', async () => {
+        try {
+          const res = await fetch('/api/server/tunnel/login', { method: 'POST' });
+          const d = await res.json();
+          showToast(d.message || 'Browser login window opened');
+        } catch (e) {
+          showToast('Failed to trigger login');
+        }
+      });
+    }
+
+    if (dom.btnCopyTunnelUrl) {
+      dom.btnCopyTunnelUrl.addEventListener('click', () => {
+        const u = dom.tunnelActiveUrl.textContent;
+        if (u && !u.includes('...')) {
+          navigator.clipboard.writeText(u).then(() => showToast('Copied: ' + u));
+        }
+      });
     }
 
     async function pollStatus() {
@@ -552,7 +790,9 @@
     });
 
     pollStatus();
+    pollTunnelStatus();
     setInterval(pollStatus, 2000);
+    setInterval(pollTunnelStatus, 3000);
   </script>
 </body>
 </html>

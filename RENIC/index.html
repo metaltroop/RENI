@@ -9,7 +9,7 @@
   <title>RENIC // Remote System Access</title>
   
   <link rel="manifest" href="/manifest.json">
-  <link rel="stylesheet" href="/style.css?v=2.5">
+  <link rel="stylesheet" href="/style.css?v=3.0">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;800&family=Orbitron:wght@600;800;900&family=Rajdhani:wght@500;600;700&display=swap" rel="stylesheet">
@@ -82,6 +82,7 @@
 
         <!-- Quick 1-Thumb Zoom Pills -->
         <div class="zoom-pill-group">
+          <button id="btn-zoom-lock" class="zoom-btn active" title="Lock/Unlock Pinch Zoom">🔒</button>
           <button id="btn-zoom-out" class="zoom-btn" title="Zoom Out">-</button>
           <button id="btn-zoom-reset" class="zoom-btn" title="Reset Zoom">1:1</button>
           <button id="btn-zoom-in" class="zoom-btn" title="Zoom In">+</button>
@@ -114,6 +115,53 @@
           </div>
         </div>
       </div>
+
+      <!-- FLOATING PUBG-STYLE MOUSE TRIGGERS LAYER -->
+      <div id="hud-triggers-layer" class="hud-triggers-overlay">
+        <div id="hud-trigger-lclick" class="hud-trigger-btn trigger-primary" title="Left Click / Drag (Hold to drag)">
+          <span class="trigger-label">L-CLICK</span>
+        </div>
+        <div id="hud-trigger-rclick" class="hud-trigger-btn trigger-secondary" title="Right Click">
+          <span class="trigger-label">R-CLICK</span>
+        </div>
+        <div id="hud-trigger-dblclick" class="hud-trigger-btn trigger-action" title="1-Tap Double Click">
+          <span class="trigger-label">DBL-CLK</span>
+        </div>
+        <div id="hud-trigger-scroll" class="hud-trigger-rocker" title="Scroll Rocker">
+          <button id="hud-scroll-up" class="rocker-btn" title="Scroll Up">▲</button>
+          <button id="hud-scroll-down" class="rocker-btn" title="Scroll Down">▼</button>
+        </div>
+      </div>
+
+      <!-- PUBG-STYLE HUD LAYOUT CUSTOMIZER OVERLAY -->
+      <div id="hud-editor-overlay" class="hud-editor-overlay hidden">
+        <div class="hud-editor-grid-pattern"></div>
+        <div class="hud-editor-toolbar">
+          <div class="editor-title-row">
+            <span class="editor-title">🎯 HUD LAYOUT EDITOR</span>
+            <span class="editor-subtitle">Drag buttons to reposition & tune size/opacity</span>
+          </div>
+          <div class="editor-controls-row">
+            <div class="editor-control-item">
+              <label>SIZE: <span id="hud-size-val">100%</span></label>
+              <input type="range" id="hud-size-slider" min="50" max="180" step="5" value="100">
+            </div>
+            <div class="editor-control-item">
+              <label>OPACITY: <span id="hud-opacity-val">85%</span></label>
+              <input type="range" id="hud-opacity-slider" min="20" max="100" step="5" value="85">
+            </div>
+            <div class="editor-control-item">
+              <label>SHOW HUD:</label>
+              <input type="checkbox" id="hud-visible-toggle" checked>
+            </div>
+            <div class="editor-actions">
+              <button id="btn-hud-reset" class="btn-editor-action btn-danger">↺ Reset</button>
+              <button id="btn-hud-save" class="btn-editor-action btn-primary">💾 Save</button>
+              <button id="btn-hud-close" class="btn-editor-action btn-secondary">✕ Close</button>
+            </div>
+          </div>
+        </div>
+      </div>
     </main>
 
     <!-- FLOATING ACTION BUTTON (RESTORES CONTROLS WHEN MINIMIZED) -->
@@ -122,6 +170,7 @@
         <span class="fab-icon">⚡</span>
       </button>
       <div class="fab-quick-bar">
+        <button id="fab-quick-zoom-lock" class="fab-mini-btn active" title="Lock/Unlock Pinch Zoom">🔒</button>
         <button id="fab-quick-mode" class="fab-mini-btn" title="Toggle Input Mode">🖱️</button>
         <button id="fab-quick-zoom-in" class="fab-mini-btn" title="Zoom In">+</button>
         <button id="fab-quick-zoom-out" class="fab-mini-btn" title="Zoom Out">-</button>
@@ -263,18 +312,42 @@
         </div>
 
         <div class="settings-group">
+          <h4>HUD & TOUCH CONTROLS</h4>
+          <button id="btn-open-hud-editor" class="reni-btn btn-secondary">
+            <span>🎯 Customize Controls (PUBG Layout Editor)</span>
+          </button>
+          <div class="toggle-row">
+            <div class="toggle-info">
+              <span class="toggle-title">Floating Mouse Triggers</span>
+              <span class="toggle-desc">Show on-screen L/R click & scroll buttons</span>
+            </div>
+            <label class="switch">
+              <input type="checkbox" id="toggle-hud-triggers" checked>
+              <span class="slider round"></span>
+            </label>
+          </div>
+        </div>
+
+        <div class="settings-group">
           <h4>STREAM PERFORMANCE</h4>
-          <div class="slider-row">
-            <label>Resolution Scale: <span id="scale-label">75%</span></label>
-            <input type="range" id="stream-scale-slider" min="0.25" max="1.0" step="0.25" value="0.75">
+          <div class="preset-segmented-control" id="stream-presets-group">
+            <button id="preset-low-latency" class="preset-tab active" data-preset="low">⚡ Low Latency</button>
+            <button id="preset-quality" class="preset-tab" data-preset="quality">💎 Quality</button>
+            <button id="preset-custom" class="preset-tab" data-preset="custom">🎛️ Custom</button>
           </div>
-          <div class="slider-row">
-            <label>Quality: <span id="quality-label">65%</span></label>
-            <input type="range" id="stream-quality-slider" min="30" max="95" step="5" value="65">
-          </div>
-          <div class="slider-row">
-            <label>Target FPS: <span id="fps-label">20 FPS</span></label>
-            <input type="range" id="stream-fps-slider" min="10" max="35" step="5" value="20">
+          <div id="custom-stream-controls" class="custom-stream-controls">
+            <div class="slider-row">
+              <label>Resolution Scale: <span id="scale-label">50%</span></label>
+              <input type="range" id="stream-scale-slider" min="0.25" max="1.0" step="0.25" value="0.50">
+            </div>
+            <div class="slider-row">
+              <label>Quality: <span id="quality-label">42%</span></label>
+              <input type="range" id="stream-quality-slider" min="30" max="95" step="1" value="42">
+            </div>
+            <div class="slider-row">
+              <label>Target FPS: <span id="fps-label">30 FPS</span></label>
+              <input type="range" id="stream-fps-slider" min="10" max="35" step="5" value="30">
+            </div>
           </div>
           <div class="slider-row">
             <label>Trackpad Sensitivity: <span id="sens-label">1.5x</span></label>
@@ -532,6 +605,6 @@
     <div id="nitro-toast" class="toast hidden"></div>
   </div>
 
-  <script src="/app.js?v=2.5"></script>
+  <script src="/app.js?v=3.0"></script>
 </body>
 </html>

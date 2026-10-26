@@ -62,6 +62,10 @@ from PIL import Image, ImageDraw
 import psutil
 import jwt
 from urllib.parse import quote
+import subprocess
+import threading
+import urllib.request
+import re
 try:
     import qrcode
 except ImportError:
@@ -152,8 +156,162 @@ def get_discovered_ips() -> List[str]:
 
     return lan_ips + tailscale_ips
 
+# ==============================================================================
+# UNIVERSAL CLOUDFLARE TUNNEL MANAGER (QUICK / TOKEN / NAMED)
+# ==============================================================================
+class TunnelManager:
+    """
+    Manages Cloudflare Tunnel lifecycle with 3 universal operation modes:
+    - Mode A (Quick): cloudflared tunnel --url http://127.0.0.1:8765 (Auto-detects *.trycloudflare.com)
+    - Mode B (Token): cloudflared tunnel run --token <TOKEN>
+    - Mode C (Named): cloudflared tunnel run --url http://127.0.0.1:8765 <NAME>
+    Includes automatic download of cloudflared.exe from GitHub if missing.
+    """
+    def __init__(self):
+        self.process: Optional[subprocess.Popen] = None
+        self.mode: str = "stopped"
+        self.active_url: str = ""
+        self.error: Optional[str] = None
+        self.lock = threading.Lock()
+        self.bin_dir = SERVER_DIR / "bin"
+        self.bin_path = self.find_binary()
+
+    def find_binary(self) -> Optional[str]:
+        # 1. Local bin dir
+        local_exe = self.bin_dir / "cloudflared.exe"
+        if local_exe.exists():
+            return str(local_exe)
+        # 2. Windows standard locations
+        candidates = [
+            r"C:\Program Files (x86)\cloudflared\cloudflared.exe",
+            r"C:\Program Files\cloudflared\cloudflared.exe"
+        ]
+        for p in candidates:
+            if os.path.exists(p):
+                return p
+        # 3. System PATH
+        import shutil
+        which = shutil.which("cloudflared")
+        if which:
+            return which
+        return None
+
+    def is_installed(self) -> bool:
+        return self.find_binary() is not None
+
+    def download_cloudflared(self) -> bool:
+        self.bin_dir.mkdir(parents=True, exist_ok=True)
+        target = self.bin_dir / "cloudflared.exe"
+        url = "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe"
+        try:
+            print(f"[*] Downloading official cloudflared binary to {target}...")
+            urllib.request.urlretrieve(url, str(target))
+            self.bin_path = str(target)
+            print("[+] cloudflared successfully installed into RENIS/bin/cloudflared.exe")
+            return True
+        except Exception as e:
+            self.error = f"Download failed: {e}"
+            print(f"[!] Error downloading cloudflared: {e}")
+            return False
+
+    def get_status(self) -> Dict[str, Any]:
+        with self.lock:
+            running = self.process is not None and self.process.poll() is None
+            if not running and self.mode != "stopped":
+                self.mode = "stopped"
+            return {
+                "running": running,
+                "mode": self.mode,
+                "url": self.active_url if running else "",
+                "error": self.error,
+                "installed": self.is_installed(),
+                "pid": self.process.pid if running else None
+            }
+
+    def start(self, mode: str = "quick", token: str = "", name: str = "", custom_domain: str = "") -> Dict[str, Any]:
+        with self.lock:
+            self.stop()
+            self.error = None
+            binary = self.find_binary()
+            if not binary:
+                if not self.download_cloudflared():
+                    return {"success": False, "error": "cloudflared is not installed and auto-download failed."}
+                binary = self.find_binary()
+
+            cmd = [binary, "tunnel"]
+            if mode == "quick":
+                cmd.extend(["--url", "http://127.0.0.1:8765"])
+            elif mode == "token":
+                tk = token or AUTH_DATA.get("tunnel_token", "")
+                if not tk:
+                    return {"success": False, "error": "Cloudflare Tunnel Token is required."}
+                AUTH_DATA["tunnel_token"] = tk
+                save_auth_store()
+                cmd.extend(["run", "--token", tk])
+            elif mode == "named":
+                tunnel_name = name or "reni"
+                cmd.extend(["run", "--url", "http://127.0.0.1:8765", tunnel_name])
+            else:
+                return {"success": False, "error": f"Invalid mode: {mode}"}
+
+            if custom_domain:
+                self.active_url = custom_domain.strip().rstrip('/')
+                AUTH_DATA["tunnel_url"] = self.active_url
+                save_auth_store()
+
+            try:
+                creationflags = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+                self.process = subprocess.Popen(
+                    cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    bufsize=1,
+                    creationflags=creationflags
+                )
+                self.mode = mode
+
+                def read_stderr(proc):
+                    url_pattern = re.compile(r"https://[a-zA-Z0-9-]+\.trycloudflare\.com")
+                    try:
+                        for line in proc.stderr:
+                            match = url_pattern.search(line)
+                            if match:
+                                found = match.group(0)
+                                print(f"[+] [TUNNEL] Quick TryCloudflare URL: {found}")
+                                self.active_url = found
+                                AUTH_DATA["tunnel_url"] = found
+                                save_auth_store()
+                    except Exception:
+                        pass
+
+                t = threading.Thread(target=read_stderr, args=(self.process,), daemon=True)
+                t.start()
+
+                return {"success": True, "mode": mode, "url": self.active_url}
+            except Exception as e:
+                self.error = str(e)
+                self.mode = "stopped"
+                return {"success": False, "error": str(e)}
+
+    def stop(self) -> Dict[str, Any]:
+        if self.process:
+            try:
+                self.process.terminate()
+                self.process.kill()
+            except Exception:
+                pass
+            self.process = None
+        self.mode = "stopped"
+        return {"success": True}
+
+TUNNEL_MGR = TunnelManager()
+
 def get_configured_tunnel_url() -> Optional[str]:
     """Returns the configured public Cloudflare Tunnel URL if available."""
+    if TUNNEL_MGR and TUNNEL_MGR.get_status().get("running") and TUNNEL_MGR.active_url:
+        return TUNNEL_MGR.active_url
+
     env_url = os.getenv("RENIS_TUNNEL_URL") or os.getenv("CLOUDFLARE_TUNNEL_URL")
     if env_url:
         return env_url.strip().rstrip('/')
@@ -429,6 +587,53 @@ async def get_server_qr(request: Request, url: str = Query(..., description="Tar
     else:
         fallback_url = f"https://api.qrserver.com/v1/create-qr-code/?size=200x200&data={quote(url)}"
         return RedirectResponse(fallback_url)
+
+@app.get("/api/server/tunnel/status")
+async def get_tunnel_status(request: Request):
+    """Returns real-time status of the Cloudflare Tunnel manager."""
+    if not verify_local_or_auth(request):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    return TUNNEL_MGR.get_status()
+
+@app.post("/api/server/tunnel/start")
+async def start_tunnel_endpoint(payload: Dict[str, Any], request: Request):
+    """Starts the Cloudflare tunnel in the requested mode (quick, token, named)."""
+    if not verify_local_or_auth(request):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    mode = payload.get("mode", "quick")
+    token = payload.get("token", "")
+    name = payload.get("name", "")
+    custom_domain = payload.get("custom_domain", "")
+    return TUNNEL_MGR.start(mode=mode, token=token, name=name, custom_domain=custom_domain)
+
+@app.post("/api/server/tunnel/stop")
+async def stop_tunnel_endpoint(request: Request):
+    """Stops any actively running Cloudflare Tunnel managed by RENIS."""
+    if not verify_local_or_auth(request):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    return TUNNEL_MGR.stop()
+
+@app.post("/api/server/tunnel/install")
+async def install_cloudflared_endpoint(request: Request):
+    """Downloads official cloudflared binary to RENIS/bin/cloudflared.exe."""
+    if not verify_local_or_auth(request):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    success = TUNNEL_MGR.download_cloudflared()
+    return {"success": success, "installed": TUNNEL_MGR.is_installed(), "path": TUNNEL_MGR.find_binary()}
+
+@app.post("/api/server/tunnel/login")
+async def login_cloudflared_endpoint(request: Request):
+    """Spawns cloudflared tunnel login browser flow."""
+    if not verify_local_or_auth(request):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    binary = TUNNEL_MGR.find_binary()
+    if not binary:
+        raise HTTPException(status_code=400, detail="cloudflared binary not found")
+    try:
+        subprocess.Popen([binary, "tunnel", "login"])
+        return {"success": True, "message": "Browser login opened"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/server/kill-sessions")
 async def kill_all_sessions(request: Request):
@@ -991,6 +1196,8 @@ async def websocket_stream(websocket: WebSocket, token: Optional[str] = Query(No
         "scale": 0.75,
         "quality": 65,
         "format": "JPEG",
+        "subsampling": 0,
+        "delta_skip": False,
         "running": True
     }
 
@@ -1011,6 +1218,10 @@ async def websocket_stream(websocket: WebSocket, token: Optional[str] = Query(No
                             fmt = data["format"].upper()
                             if fmt in ["JPEG", "WEBP"]:
                                 config["format"] = fmt
+                        if "subsampling" in data:
+                            config["subsampling"] = int(data["subsampling"])
+                        if "delta_skip" in data:
+                            config["delta_skip"] = bool(data["delta_skip"])
                 except Exception:
                     pass
         except Exception:
@@ -1025,43 +1236,71 @@ async def websocket_stream(websocket: WebSocket, token: Optional[str] = Query(No
         return
 
     try:
-        with mss.MSS() as sct:
+        with mss.mss() as sct:
             monitor = sct.monitors[1] if len(sct.monitors) > 1 else sct.monitors[0]
             mon_left = monitor.get("left", 0)
             mon_top = monitor.get("top", 0)
             
+            last_sample = None
+            last_cur = None
+            last_sent_time = 0.0
+
             while config["running"]:
                 start_time = time.perf_counter()
                 
                 # Screen capture
                 sct_img = sct.grab(monitor)
-                img = Image.frombytes("RGB", sct_img.size, sct_img.bgra, "raw", "BGRX")
 
-                # Draw real Windows host cursor directly onto frame before scaling
+                # Cursor tracking
+                cur_x, cur_y = (0, 0)
+                rel_x, rel_y = (-999, -999)
                 if pyautogui:
                     try:
                         cur_x, cur_y = pyautogui.position()
                         rel_x = cur_x - mon_left
                         rel_y = cur_y - mon_top
+                    except Exception:
+                        pass
 
-                        if 0 <= rel_x < img.width and 0 <= rel_y < img.height:
-                            draw = ImageDraw.Draw(img)
-                            r_outer = 7
-                            r_inner = 3
-                            draw.ellipse(
-                                (rel_x - r_outer, rel_y - r_outer, rel_x + r_outer, rel_y + r_outer),
-                                outline=(255, 0, 51),
-                                width=2
-                            )
-                            draw.ellipse(
-                                (rel_x - r_inner, rel_y - r_inner, rel_x + r_inner, rel_y + r_inner),
-                                fill=(255, 255, 255),
-                                outline=(0, 0, 0)
-                            )
-                            draw.line((rel_x - r_outer - 4, rel_y, rel_x - r_outer + 1, rel_y), fill=(255, 0, 51), width=2)
-                            draw.line((rel_x + r_outer - 1, rel_y, rel_x + r_outer + 4, rel_y), fill=(255, 0, 51), width=2)
-                            draw.line((rel_x, rel_y - r_outer - 4, rel_x, rel_y - r_outer + 1), fill=(255, 0, 51), width=2)
-                            draw.line((rel_x, rel_y + r_outer - 1, rel_x, rel_y + r_outer + 4), fill=(255, 0, 51), width=2)
+                # Smart Frame Deduplication (Bandwidth Saver)
+                cur_sample = sct_img.raw[::128]
+                cur_pos = (rel_x, rel_y)
+                now = time.perf_counter()
+
+                if config.get("delta_skip") and last_sample == cur_sample and last_cur == cur_pos:
+                    if now - last_sent_time < 1.0:
+                        target_interval = 1.0 / config["fps"]
+                        elapsed = time.perf_counter() - start_time
+                        sleep_duration = max(0.001, target_interval - elapsed)
+                        await asyncio.sleep(sleep_duration)
+                        continue
+
+                last_sample = cur_sample
+                last_cur = cur_pos
+                last_sent_time = now
+
+                img = Image.frombytes("RGB", sct_img.size, sct_img.bgra, "raw", "BGRX")
+
+                # Draw real Windows host cursor directly onto frame before scaling
+                if 0 <= rel_x < img.width and 0 <= rel_y < img.height:
+                    try:
+                        draw = ImageDraw.Draw(img)
+                        r_outer = 7
+                        r_inner = 3
+                        draw.ellipse(
+                            (rel_x - r_outer, rel_y - r_outer, rel_x + r_outer, rel_y + r_outer),
+                            outline=(255, 0, 51),
+                            width=2
+                        )
+                        draw.ellipse(
+                            (rel_x - r_inner, rel_y - r_inner, rel_x + r_inner, rel_y + r_inner),
+                            fill=(255, 255, 255),
+                            outline=(0, 0, 0)
+                        )
+                        draw.line((rel_x - r_outer - 4, rel_y, rel_x - r_outer + 1, rel_y), fill=(255, 0, 51), width=2)
+                        draw.line((rel_x + r_outer - 1, rel_y, rel_x + r_outer + 4, rel_y), fill=(255, 0, 51), width=2)
+                        draw.line((rel_x, rel_y - r_outer - 4, rel_x, rel_y - r_outer + 1), fill=(255, 0, 51), width=2)
+                        draw.line((rel_x, rel_y + r_outer - 1, rel_x, rel_y + r_outer + 4), fill=(255, 0, 51), width=2)
                     except Exception:
                         pass
 
@@ -1073,12 +1312,15 @@ async def websocket_stream(websocket: WebSocket, token: Optional[str] = Query(No
                     img = img.resize((target_w, target_h), Image.Resampling.BILINEAR)
 
                 buf = io.BytesIO()
-                img.save(
-                    buf,
-                    format=config["format"],
-                    quality=config["quality"],
-                    optimize=False
-                )
+                save_kwargs = {
+                    "format": config["format"],
+                    "quality": config["quality"],
+                    "optimize": False
+                }
+                if config["format"] == "JPEG":
+                    save_kwargs["subsampling"] = config.get("subsampling", 0)
+
+                img.save(buf, **save_kwargs)
                 frame_bytes = buf.getvalue()
 
                 await websocket.send_bytes(frame_bytes)

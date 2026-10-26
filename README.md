@@ -1,35 +1,38 @@
-# PROJECT RENI // REMOTE SYSTEM ACCESS (RENIS & RENIC)
+# PROJECT RENI // REMOTE SYSTEM ACCESS (RENIS & RENIC) v3.0
 
 [![Platform](https://img.shields.io/badge/Platform-Windows%2010%20%7C%2011%20(Elevated)-0078D6?style=for-the-badge&logo=windows)](https://github.com/metaltroop/RENI)
 [![Architecture](https://img.shields.io/badge/Architecture-FastAPI%20%7B%7D%20MSS%20%7B%7D%20PWA-FF0033?style=for-the-badge)](https://github.com/metaltroop/RENI)
 [![Security](https://img.shields.io/badge/Security-W3C%20WebAuthn%20%7C%20JWT%20%7C%20PBKDF2-00F0FF?style=for-the-badge)](https://github.com/metaltroop/RENI)
 [![License](https://img.shields.io/badge/License-MIT-39FF14?style=for-the-badge)](LICENSE)
 
-> **RENI** (*Remote Network Interface*) is a high-performance, secure, self-hosted Remote Desktop and Administrative Control Monorepo engineered specifically for performance workstations and gaming laptops. It delivers low-latency desktop streaming, precision touch control, elevated UAC bypass architecture, 2-way text & screenshot clipboard synchronization, and real-time hardware telemetry to any smartphone browser over Local Wi-Fi, Tailscale VPN, or Cloudflare Tunnel with zero third-party cloud dependencies.
+> **RENI** (*Remote Network Interface*) is a high-performance, secure, self-hosted Remote Desktop and Administrative Control Monorepo engineered specifically for performance workstations and gaming laptops. It delivers low-latency desktop streaming, precision touch control, PUBG-style customizable HUD mouse triggers, zoom lock, elevated UAC bypass architecture, 2-way text & screenshot clipboard synchronization, a native Windows Desktop GUI Control Center, and universal zero-setup Cloudflare Tunnel onboarding with zero third-party cloud dependencies.
 
 ---
 
-## ⚡ ARCHITECTURE OVERVIEW
+## ⚡ ARCHITECTURE OVERVIEW (v3.0)
 
 ```text
 RENI/
 ├── .gitignore                     # Strict Git rules (protects renis_auth.json, venv, caches)
 ├── README.md                      # Comprehensive system and deployment documentation
 ├── setup_renis_admin.bat          # Automated admin setup (Registry UAC, Firewall, Venv, Task)
-├── start_reni.bat                 # One-click launcher with Cloudflare Tunnel auto-detection
-├── RENIS/                         # [Remote Server Engine] Windows Host Service
+├── start_reni.bat                 # Launches Desktop GUI Control Center by default (with --cli fallback)
+├── RENIS/                         # [Remote Server Engine & Desktop GUI] Windows Host Service
 │   ├── requirements.txt           # Python dependencies (FastAPI, MSS, PyAutoGUI, Pillow, qrcode, psutil)
-│   ├── dashboard.html             # Host machine control panel with real scannable QR quick-connect
+│   ├── renis_gui.py               # Native Windows Desktop GUI Control Center (Obsidian/Cyan aesthetic)
+│   ├── renis_server.py            # High-performance ASGI HTTP & WebSocket engine + TunnelManager
+│   ├── dashboard.html             # Host machine control panel with interactive Cloudflare Tunnel Manager
 │   ├── .env.example               # Environment configuration template
-│   ├── renis_server.py            # High-performance ASGI HTTP & WebSocket engine
 │   └── renis_wol_trigger.py       # Standalone & importable Wake-on-LAN Magic Packet utility
 └── RENIC/                         # [Remote Client] Mobile-First PWA
-    ├── index.html                 # Mobile-optimized shell with circular SVG gauges and tactical HUD
-    ├── style.css                  # Obsidian, carbon-fiber, Neon Crimson & Cyan styling
-    ├── app.js                     # Zero-lag canvas stream, gesture engine, clipboard sync & terminal drawer
+    ├── index.html                 # Mobile shell with circular SVG gauges, PUBG triggers & HUD editor
+    ├── style.css                  # Obsidian, carbon-fiber, Neon Crimson & Cyan styling (v3.0)
+    ├── app.js                     # Zero-lag canvas stream, PUBG triggers, zoom lock, HUD customizer (v3.0)
     ├── manifest.json              # Standalone fullscreen PWA manifest
-    ├── sw.js                      # Service Worker for offline asset caching (v2.5)
+    ├── sw.js                      # Service Worker for offline asset caching (v3.0)
     ├── icon-192.png               # High-res PWA launcher icon (192x192)
+    └── icon-512.png               # High-res PWA splash icon (512x512)
+```# High-res PWA launcher icon (192x192)
     └── icon-512.png               # High-res PWA splash icon (512x512)
 ```
 
@@ -71,13 +74,47 @@ The system features an industrial Cyberpunk design optimized for OLED smartphone
   * Direct laptop browser visits to `http://localhost:8765` auto-redirect to `/dashboard`.
   * Public tunnel visitors cannot access `/dashboard` or management endpoints (`/api/server/*`) without authenticated JWT tokens.
 
-### 3. Host Dashboard (`/dashboard`) with 100% Real Scannable QR Code
-* Running on `http://localhost:8765/dashboard`, the host dashboard displays live hardware telemetry and active sessions.
-* **100% Real Scannable QR Code (`/api/server/qr`):** Generates genuine high-contrast PNG QR codes via Python `qrcode` (with automatic fallback to QRServer API). Pointing an iOS Camera or Android Google Lens scans the URL reliably.
-* **One-Click Session Termination:** Disconnect all remote mobile stream and input channels instantly.
-* **24/7 Always-On Lid Power Configuration:** Configures Windows `powercfg` so the laptop stays awake on AC power with the lid closed.
+### 3. Native Desktop GUI & Universal Cloudflare Tunnel Manager
+* **Desktop Control Center (`RENIS/renis_gui.py`):**
+  * Built using Tkinter with an Obsidian (`#0B0C10`), Cyan (`#00F0FF`), and Crimson (`#FF0033`) aesthetic.
+  * Start and stop the RENIS server on any port with 1 click.
+  * Real-time scannable QR code display for quick phone onboarding.
+  * Toggle 24/7 lid-closed always-on power mode and terminate active sessions.
+  * Live auto-scrolling terminal logs console.
+* **Universal 3-Mode Cloudflare Tunnel Manager:**
+  * **Mode A: Quick Free Tunnel (Zero Setup):** Runs `cloudflared tunnel --url http://127.0.0.1:8765`, scrapes stderr for the public `https://*.trycloudflare.com` link, and displays the QR code instantly. No Cloudflare account or domain needed!
+  * **Mode B: Cloudflare Account Token:** Paste your Cloudflare Zero Trust Tunnel Token directly into the GUI or `/dashboard`.
+  * **Mode C: Named Local Tunnel:** Supports named tunnels (`reni`) with automatic browser login authorization (`cloudflared tunnel login`).
+  * **Auto-Installer:** If `cloudflared.exe` is missing, a 1-click button downloads the official `cloudflared-windows-amd64.exe` binary directly into `RENIS/bin/cloudflared.exe`.
 
-### 4. Bidirectional 2-Way Text & Screenshot Clipboard Sync
+### 4. Zoom Lock (`🔒` / `🔓`) for Flawless 2-Finger Scrolling
+* When 2-finger scrolling on touchscreen devices, accidental pinch gestures can inadvertently zoom the viewport.
+* **Zoom Lock (`🔒`) is ON by default:** 2-finger gestures on `#viewport-wrapper` exclusively perform smooth vertical and horizontal mouse scrolling and 2-finger tap right-clicking.
+* Toggling to **Unlocked (`🔓`)** enables hardware-accelerated pinch-to-zoom and pan (`0.5x` to `4.0x`).
+* Dedicated zoom buttons (`+`, `-`, `1:1`) remain active at all times.
+
+### 5. PUBG-Style Floating Mouse Triggers & Customizable HUD Editor
+* Mobile touchscreens now feature tactile, game-style floating mouse triggers:
+  * **`L-CLICK` (Primary Left Button):** Tap for instant left click; double-tap for double click; hold and move finger on the trackpad to drag windows, select text, or adjust sliders with effortless precision.
+  * **`R-CLICK` (Secondary Right Button):** Instant right click.
+  * **`DBL-CLK` (Double Click Button):** 1-tap double-click for opening files, desktop shortcuts, and installers.
+  * **`SCROLL ▲ / ▼` Rocker:** Compact rocker button for stepping mouse scroll up and down.
+* **Interactive HUD Layout Editor:**
+  * Tap **"🎯 Customize Controls (PUBG Layout Editor)"** in Settings or Header to enter layout mode.
+  * Drag and position each button anywhere on screen.
+  * Adjust button **Size** (50% – 180%) and **Opacity** (20% – 100%).
+  * Coordinates persist to `localStorage` as percentages of viewport width and height, adapting automatically to portrait and landscape orientation.
+
+### 6. Stream Performance Presets: Low-Latency & Quality
+* **⚡ Low Latency Mode (Default):**
+  * `scale: 0.50`, `quality: 42`, `fps: 30`, `subsampling: 2` (JPEG 4:2:0 fast chroma subsampling), and `delta_skip: true`.
+  * **Smart Frame Deduplication:** Automatically skips sending duplicate frames when pixels and cursor position haven't changed, reducing idle mobile data usage to near zero while keeping cursor response instantaneous.
+* **💎 High Quality Mode:**
+  * `scale: 1.0`, `quality: 85`, `fps: 20`, `subsampling: 0` (4:4:4 full chroma subsampling for crisp, readable text and fine installer detail).
+* **🎛️ Custom Mode:**
+  * Unlocks manual sliders for Resolution Scale (25%–100%), Quality (30%–95%), and FPS (10–35).
+
+### 7. Bidirectional 2-Way Text & Screenshot Clipboard Sync
 * **Text Push (Phone ➔ PC):** Send text or links from phone clipboard directly into the PC clipboard.
 * **Text Pull (PC ➔ Phone):** Read host clipboard content and copy it into the smartphone system clipboard.
 * **Instant Window Injection:** Push text to PC and immediately simulate `Ctrl+V` into whatever application is currently focused on the PC.
@@ -85,21 +122,10 @@ The system features an industrial Cyberpunk design optimized for OLED smartphone
   * One-tap desktop screenshot capture (`/api/clipboard/capture-screen`) sent to phone preview with download and copy options.
   * Upload screenshots or images from phone directly into the PC clipboard as raw bitmaps.
 
-### 5. Universal Pinch-to-Zoom (`0.5x` to `4.0x`)
-* Smooth hardware-accelerated zoom scaling (`0.5x` to `4.0x`) and panning.
-* Works seamlessly in both **Trackpad Mode** and **Direct Touch Mode**.
-* Dedicated quick-zoom buttons (`+`, `-`, `1:1`) in the header and floating HUD pill.
-* Double-tap canvas to reset zoom instantly to `1.0x`.
-
-### 6. Minimizable Fullscreen HUD (Landscape & Gaming Mode)
-* Tap the minimize button (`⛶`) to collapse the top header and bottom dock into a sleek floating action pill (`⚡`).
-* Leaves the entire screen dedicated to low-latency desktop streaming—ideal for full-screen gaming, IDE editing, and terminal work.
-* Quick-access buttons on the floating pill for instant zoom in/out, keyboard trigger, input mode toggle, and restoring the full HUD.
-
-### 7. Dual-Mode Touch & Input Engine (`/ws/control`)
+### 8. Dual-Mode Touch & Input Engine (`/ws/control`)
 * **Mode 1: Precision Trackpad Mode (Default):**
   * Relative cursor glide with adjustable sensitivity (`0.5x` – `3.0x`).
-  * 1-Finger Tap: Left Click.
+  * 1-Finger Tap: Left Click (threshold increased to 14px and 320ms for thumb reliability).
   * 1-Finger Drag: Cursor Movement.
   * 1-Finger Double-Tap & Hold: Click & Drag windows, sliders, and files.
   * 2-Finger Tap: Right Click.
@@ -111,12 +137,12 @@ The system features an industrial Cyberpunk design optimized for OLED smartphone
 * **Tactical Shortcut Dock:**
   * Dedicated macros for **Task View** (`Win+Tab`), **Task Manager** (`Ctrl+Shift+Esc`), `Alt+Tab`, `Alt+F4`, `Enter`, `Esc`, `Tab`, and `Win`.
 
-### 8. Elevated Remote PowerShell Terminal Drawer (`/ws/terminal`)
+### 9. Elevated Remote PowerShell Terminal Drawer (`/ws/terminal`)
 * Slide-up **Admin Shell Drawer** connected via real-time WebSocket to an elevated Windows `powershell.exe` instance.
 * Run software installations (`winget install ...`, `choco`), query processes, manage services, and execute maintenance scripts directly from your phone.
 * Includes one-tap macro chips (`winget upgrade`, `top cpu`, `services`, `ipconfig`) and a dedicated `^C` interrupt trigger.
 
-### 9. Windows UAC Bypass Architecture
+### 10. Windows UAC Bypass Architecture
 * Standard remote tools go black when Windows opens a User Account Control elevation prompt on the isolated `Winlogon` desktop.
 * `setup_renis_admin.bat` automatically configures:
   ```reg

@@ -36,20 +36,28 @@ if defined CLOUDFLARED_BIN (
     echo [+] RENI Cloudflare Tunnel started (bound to IPv4 http://127.0.0.1:8765).
 )
 
-:: 2. Check for Python virtual environment in RENIS\venv and launch server
+:: 2. Check for Python virtual environment in RENIS\venv and launch GUI or CLI
+set "TARGET_SCRIPT=RENIS\renis_gui.py"
+if "%~1"=="--cli" (
+    echo [*] CLI mode requested. Launching raw terminal server...
+    set "TARGET_SCRIPT=RENIS\renis_server.py"
+) else (
+    echo [*] Launching RENI Desktop GUI Control Center...
+)
+
 if exist "RENIS\venv\Scripts\activate.bat" (
     echo [*] Activating Python environment from .\RENIS\venv...
     call "RENIS\venv\Scripts\activate.bat"
-    python "RENIS\renis_server.py"
+    python "%TARGET_SCRIPT%"
 ) else (
     echo [!] Virtual environment not found at .\RENIS\venv.
     echo [*] Falling back to system Python...
-    python "RENIS\renis_server.py"
+    python "%TARGET_SCRIPT%"
 )
 
 if %errorLevel% neq 0 (
     echo.
-    echo [-] RENIS Server terminated unexpectedly with exit code %errorLevel%.
+    echo [-] RENIS process terminated unexpectedly with exit code %errorLevel%.
     echo [*] If dependencies are missing, run setup_renis_admin.bat first.
     pause
 )

@@ -1405,4 +1405,325 @@ input:checked + .slider:before { transform: translateX(20px); }
   }
 }
 
+/* ==============================================================================
+   v3.0 UPGRADE: ZOOM LOCK, PUBG MOUSE TRIGGERS & HUD CUSTOMIZER
+   ============================================================================== */
+
+/* Zoom Lock States */
+.zoom-btn.active, .fab-mini-btn.active {
+  background: rgba(0, 240, 255, 0.2) !important;
+  color: var(--accent-cyan) !important;
+  border-color: var(--accent-cyan) !important;
+  text-shadow: 0 0 8px var(--accent-cyan-glow);
+}
+
+/* Floating HUD Triggers Overlay */
+.hud-triggers-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 15;
+  overflow: hidden;
+}
+
+.hud-trigger-btn {
+  position: absolute;
+  pointer-events: auto;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  font-family: var(--font-display);
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+  transition: transform 0.1s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.1s, border-color 0.2s, background 0.1s;
+  cursor: pointer;
+}
+
+.hud-trigger-btn:active, .hud-trigger-btn.active {
+  transform: scale(0.92) !important;
+}
+
+/* Primary Left Click (Hold-drag capable) */
+.trigger-primary {
+  width: 66px;
+  height: 66px;
+  background: rgba(20, 22, 29, 0.75);
+  border: 2px solid var(--accent-cyan);
+  color: var(--accent-cyan);
+  box-shadow: 0 0 15px rgba(0, 240, 255, 0.3);
+  font-size: 11px;
+}
+
+.trigger-primary:active, .trigger-primary.active {
+  background: var(--accent-cyan);
+  color: #000000;
+  box-shadow: 0 0 25px rgba(0, 240, 255, 0.7);
+}
+
+/* Secondary Right Click */
+.trigger-secondary {
+  width: 56px;
+  height: 56px;
+  background: rgba(20, 22, 29, 0.75);
+  border: 2px solid #FF0033;
+  color: #FF0033;
+  box-shadow: 0 0 12px rgba(255, 0, 51, 0.3);
+  font-size: 10px;
+}
+
+.trigger-secondary:active, .trigger-secondary.active {
+  background: #FF0033;
+  color: #FFFFFF;
+  box-shadow: 0 0 20px rgba(255, 0, 51, 0.6);
+}
+
+/* Dedicated Double Click */
+.trigger-action {
+  width: 52px;
+  height: 52px;
+  background: rgba(20, 22, 29, 0.75);
+  border: 2px solid #A855F7;
+  color: #A855F7;
+  box-shadow: 0 0 12px rgba(168, 85, 247, 0.3);
+  font-size: 9px;
+}
+
+.trigger-action:active, .trigger-action.active {
+  background: #A855F7;
+  color: #FFFFFF;
+  box-shadow: 0 0 20px rgba(168, 85, 247, 0.6);
+}
+
+/* Scroll Rocker */
+.hud-trigger-rocker {
+  position: absolute;
+  pointer-events: auto;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: none;
+  width: 44px;
+  height: 92px;
+  background: rgba(20, 22, 29, 0.75);
+  border: 2px solid #39FF14;
+  border-radius: 22px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 0 15px rgba(57, 255, 20, 0.25);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+.rocker-btn {
+  flex: 1;
+  background: transparent;
+  border: none;
+  color: #39FF14;
+  font-size: 15px;
+  font-weight: 900;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 0.15s, transform 0.1s;
+}
+
+.rocker-btn:first-child {
+  border-bottom: 1px solid rgba(57, 255, 20, 0.3);
+}
+
+.rocker-btn:active {
+  background: #39FF14;
+  color: #000000;
+}
+
+/* In-Editor Highlight */
+.in-edit-mode .hud-trigger-btn,
+.in-edit-mode .hud-trigger-rocker {
+  border-style: dashed !important;
+  cursor: move !important;
+  box-shadow: 0 0 18px rgba(255, 255, 255, 0.4) !important;
+}
+
+.in-edit-mode .hud-trigger-btn.selected,
+.in-edit-mode .hud-trigger-rocker.selected {
+  outline: 2px solid #FFFFFF;
+  outline-offset: 4px;
+}
+
+/* PUBG-Style HUD Layout Customizer Overlay */
+.hud-editor-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  z-index: 1000;
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+}
+
+.hud-editor-overlay.hidden {
+  display: none !important;
+}
+
+.hud-editor-grid-pattern {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-size: 32px 32px;
+  background-image: 
+    linear-gradient(to right, rgba(0, 240, 255, 0.1) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(0, 240, 255, 0.1) 1px, transparent 1px);
+  pointer-events: none;
+}
+
+.hud-editor-toolbar {
+  position: relative;
+  margin: calc(12px + var(--safe-top)) auto 0 auto;
+  width: calc(100% - 24px);
+  max-width: 620px;
+  background: rgba(11, 12, 16, 0.92);
+  border: 1px solid var(--accent-cyan);
+  border-radius: 12px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.8), 0 0 20px var(--accent-cyan-glow);
+  padding: 12px 16px;
+  pointer-events: auto;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+
+.editor-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--border-subtle);
+  padding-bottom: 6px;
+}
+
+.editor-title {
+  font-family: var(--font-display);
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 1.5px;
+  color: var(--accent-cyan);
+}
+
+.editor-subtitle {
+  font-family: var(--font-ui);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.editor-controls-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 14px;
+}
+
+.editor-control-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-main);
+}
+
+.editor-control-item input[type="range"] {
+  width: 90px;
+  accent-color: var(--accent-cyan);
+}
+
+.editor-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.btn-editor-action {
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: all 0.2s;
+}
+
+.btn-editor-action.btn-primary {
+  background: var(--accent-cyan);
+  color: #000000;
+  box-shadow: 0 0 10px var(--accent-cyan-glow);
+}
+
+.btn-editor-action.btn-secondary {
+  background: var(--bg-card);
+  border-color: var(--border-subtle);
+  color: var(--text-main);
+}
+
+.btn-editor-action.btn-danger {
+  background: rgba(255, 0, 51, 0.15);
+  border-color: var(--accent-red);
+  color: var(--accent-red);
+}
+
+/* Stream Presets Segmented Selector */
+.preset-segmented-control {
+  display: flex;
+  gap: 4px;
+  background: #060709;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  padding: 3px;
+  margin-bottom: 8px;
+}
+
+.preset-tab {
+  flex: 1;
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  padding: 8px 4px;
+  border-radius: 6px;
+  cursor: pointer;
+  text-align: center;
+  transition: all 0.2s;
+}
+
+.preset-tab.active {
+  background: rgba(0, 240, 255, 0.15);
+  border-color: var(--accent-cyan);
+  color: var(--accent-cyan);
+  box-shadow: 0 0 10px var(--accent-cyan-glow);
+}
+
+.custom-stream-controls.hidden {
+  display: none !important;
+}
+
 

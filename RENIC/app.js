@@ -20,15 +20,19 @@
     deferredPwaPrompt: null,
     
     // Performance & Streaming
-    fps: 20,
-    scale: 0.75,
-    quality: 65,
+    fps: 30,
+    scale: 0.50,
+    quality: 42,
+    subsampling: 2, // 2 for 4:2:0 fast subsampling, 0 for 4:4:4 quality
+    delta_skip: true, // skip sending duplicate frames if screen hasn't changed
+    streamPreset: 'low', // 'low' | 'quality' | 'custom'
     highFreqActive: false,
     
     // Touch & Input
     inputMode: 'trackpad', // 'trackpad' | 'direct'
     trackpadSensitivity: 1.5,
     stickyModifiers: new Set(),
+    isHoldingLClick: false,
     
     // Canvas & Universal Zoom (0.5x to 4.0x)
     canvasWidth: 1920,
@@ -36,11 +40,23 @@
     zoomScale: 1.0,
     panX: 0,
     panY: 0,
+    zoomLocked: true, // locked by default for flawless 2-finger scrolling!
     
-    // UI State
+    // UI & HUD State
     hudCollapsed: false,
     enteredPin: '',
     currentClipboardImage: null,
+    hudConfig: {
+      visible: true,
+      size: 100,
+      opacity: 85,
+      elements: {
+        lclick: { left: 8, top: 62 },
+        rclick: { left: 8, top: 48 },
+        dblclick: { left: 8, top: 36 },
+        scroll: { left: 88, top: 52 }
+      }
+    },
     
     // Hidden Easter Egg Tap Counter
     eggTapCount: 0,
@@ -68,6 +84,7 @@
     btnModeToggle: document.getElementById('btn-mode-toggle'),
     modeIcon: document.getElementById('mode-icon'),
     modeText: document.getElementById('mode-text'),
+    btnZoomLock: document.getElementById('btn-zoom-lock'),
     btnZoomIn: document.getElementById('btn-zoom-in'),
     btnZoomOut: document.getElementById('btn-zoom-out'),
     btnZoomReset: document.getElementById('btn-zoom-reset'),
@@ -78,6 +95,7 @@
     // Minimized Floating Action Pill
     fabContainer: document.getElementById('floating-fab-container'),
     btnFabRestore: document.getElementById('btn-fab-restore'),
+    fabQuickZoomLock: document.getElementById('fab-quick-zoom-lock'),
     fabQuickMode: document.getElementById('fab-quick-mode'),
     fabQuickZoomIn: document.getElementById('fab-quick-zoom-in'),
     fabQuickZoomOut: document.getElementById('fab-quick-zoom-out'),
@@ -89,6 +107,28 @@
     ctx: document.getElementById('stream-canvas').getContext('2d'),
     streamOverlay: document.getElementById('stream-overlay'),
     streamStatusText: document.getElementById('stream-status-text'),
+
+    // PUBG-Style HUD Triggers Layer
+    hudTriggersLayer: document.getElementById('hud-triggers-layer'),
+    hudTriggerLClick: document.getElementById('hud-trigger-lclick'),
+    hudTriggerRClick: document.getElementById('hud-trigger-rclick'),
+    hudTriggerDblClick: document.getElementById('hud-trigger-dblclick'),
+    hudTriggerScroll: document.getElementById('hud-trigger-scroll'),
+    hudScrollUp: document.getElementById('hud-scroll-up'),
+    hudScrollDown: document.getElementById('hud-scroll-down'),
+    toggleHudTriggers: document.getElementById('toggle-hud-triggers'),
+    btnOpenHudEditor: document.getElementById('btn-open-hud-editor'),
+
+    // PUBG HUD Layout Customizer Overlay
+    hudEditorOverlay: document.getElementById('hud-editor-overlay'),
+    hudSizeSlider: document.getElementById('hud-size-slider'),
+    hudSizeVal: document.getElementById('hud-size-val'),
+    hudOpacitySlider: document.getElementById('hud-opacity-slider'),
+    hudOpacityVal: document.getElementById('hud-opacity-val'),
+    hudVisibleToggle: document.getElementById('hud-visible-toggle'),
+    btnHudReset: document.getElementById('btn-hud-reset'),
+    btnHudSave: document.getElementById('btn-hud-save'),
+    btnHudClose: document.getElementById('btn-hud-close'),
 
     // Bottom Tactical Dock
     bottomDock: document.getElementById('bottom-dock'),
@@ -125,6 +165,10 @@
     btnOpenPinChange: document.getElementById('btn-open-pin-change'),
     toggleBlackout: document.getElementById('toggle-blackout'),
     toggleKeepawake: document.getElementById('toggle-keepawake'),
+    presetLow: document.getElementById('preset-low-latency'),
+    presetQuality: document.getElementById('preset-quality'),
+    presetCustom: document.getElementById('preset-custom'),
+    customStreamControls: document.getElementById('custom-stream-controls'),
     scaleSlider: document.getElementById('stream-scale-slider'),
     scaleLabel: document.getElementById('scale-label'),
     qualitySlider: document.getElementById('stream-quality-slider'),
@@ -243,6 +287,37 @@
     dom.fabQuickZoomOut.addEventListener('click', () => {
       state.zoomScale = Math.max(0.5, state.zoomScale - 0.25);
       applyCanvasTransform();
+    });
+  }
+
+  function setZoomLocked(locked) {
+    state.zoomLocked = locked;
+    const icon = locked ? '🔒' : '🔓';
+    const title = locked ? 'Zoom Locked (2-Finger Scroll Active)' : 'Zoom Unlocked (Pinch-to-Zoom Active)';
+    if (dom.btnZoomLock) {
+      dom.btnZoomLock.textContent = icon;
+      dom.btnZoomLock.title = title;
+      if (locked) dom.btnZoomLock.classList.add('active');
+      else dom.btnZoomLock.classList.remove('active');
+    }
+    if (dom.fabQuickZoomLock) {
+      dom.fabQuickZoomLock.textContent = icon;
+      dom.fabQuickZoomLock.title = title;
+      if (locked) dom.fabQuickZoomLock.classList.add('active');
+      else dom.fabQuickZoomLock.classList.remove('active');
+    }
+  }
+
+  if (dom.btnZoomLock) {
+    dom.btnZoomLock.addEventListener('click', () => {
+      setZoomLocked(!state.zoomLocked);
+      showToast(state.zoomLocked ? "🔒 Zoom Locked — Smooth 2-Finger Scroll" : "🔓 Zoom Unlocked — Pinch-to-Zoom Active");
+    });
+  }
+  if (dom.fabQuickZoomLock) {
+    dom.fabQuickZoomLock.addEventListener('click', () => {
+      setZoomLocked(!state.zoomLocked);
+      showToast(state.zoomLocked ? "🔒 Zoom Locked" : "🔓 Zoom Unlocked");
     });
   }
 
@@ -665,7 +740,9 @@
       sendStreamConfig({
         fps: state.fps,
         scale: state.scale,
-        quality: state.quality
+        quality: state.quality,
+        subsampling: state.subsampling,
+        delta_skip: state.delta_skip
       });
     };
 
@@ -871,7 +948,7 @@
       const rawDy = (touch.clientY - lastTouchPos.y) * state.trackpadSensitivity;
       
       const distFromStart = Math.hypot(touch.clientX - touchStartPos.x, touch.clientY - touchStartPos.y);
-      if (distFromStart > 6) {
+      if (distFromStart > 14) {
         hasMovedSignificantly = true;
       }
 
@@ -890,33 +967,46 @@
     } else if (e.touches.length === 2 && isTwoFingerGesture) {
       hasMovedSignificantly = true;
 
-      const curDist = Math.hypot(
-        e.touches[0].clientX - e.touches[1].clientX,
-        e.touches[0].clientY - e.touches[1].clientY
-      );
-      const distDelta = Math.abs(curDist - initialPinchDist);
-
-      if (distDelta > 12 || isPinching) {
-        isPinching = true;
-        const scaleRatio = curDist / (initialPinchDist || 1);
-        const newScale = Math.max(0.5, Math.min(4.0, initialZoomScale * scaleRatio));
-        
-        const curMidpoint = {
-          x: (e.touches[0].clientX + e.touches[1].clientX) / 2,
-          y: (e.touches[0].clientY + e.touches[1].clientY) / 2
-        };
-
-        state.zoomScale = newScale;
-        state.panX = initialPan.x + (curMidpoint.x - initialMidpoint.x);
-        state.panY = initialPan.y + (curMidpoint.y - initialMidpoint.y);
-        applyCanvasTransform();
-      } else if (!isPinching) {
+      if (state.zoomLocked) {
+        // Locked mode: Flawless smooth 2-finger scrolling, pinch zoom completely disabled!
+        isPinching = false;
         const curY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
         const deltaY = curY - twoFingerStartY;
         if (Math.abs(deltaY) > 8) {
           const scrollAmount = deltaY > 0 ? 120 : -120;
           sendControl({ type: "mouse_scroll", dy: scrollAmount });
           twoFingerStartY = curY;
+        }
+      } else {
+        // Unlocked mode (🔓): Pinch-to-zoom and pan active
+        const curDist = Math.hypot(
+          e.touches[0].clientX - e.touches[1].clientX,
+          e.touches[0].clientY - e.touches[1].clientY
+        );
+        const distDelta = Math.abs(curDist - initialPinchDist);
+
+        if (distDelta > 12 || isPinching) {
+          isPinching = true;
+          const scaleRatio = curDist / (initialPinchDist || 1);
+          const newScale = Math.max(0.5, Math.min(4.0, initialZoomScale * scaleRatio));
+          
+          const curMidpoint = {
+            x: (e.touches[0].clientX + e.touches[1].clientX) / 2,
+            y: (e.touches[0].clientY + e.touches[1].clientY) / 2
+          };
+
+          state.zoomScale = newScale;
+          state.panX = initialPan.x + (curMidpoint.x - initialMidpoint.x);
+          state.panY = initialPan.y + (curMidpoint.y - initialMidpoint.y);
+          applyCanvasTransform();
+        } else if (!isPinching) {
+          const curY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+          const deltaY = curY - twoFingerStartY;
+          if (Math.abs(deltaY) > 8) {
+            const scrollAmount = deltaY > 0 ? 120 : -120;
+            sendControl({ type: "mouse_scroll", dy: scrollAmount });
+            twoFingerStartY = curY;
+          }
         }
       }
     }
@@ -950,7 +1040,7 @@
       return;
     }
 
-    if (!hasMovedSignificantly && duration < 250) {
+    if (!hasMovedSignificantly && duration < 320) {
       const timeSinceLastTap = Date.now() - lastTapTime;
       if (timeSinceLastTap < 280 && Math.abs(state.zoomScale - 1.0) > 0.05) {
         resetZoom();
@@ -1231,6 +1321,419 @@
     dom.sensLabel.textContent = `${val}x`;
     state.trackpadSensitivity = val;
   });
+
+  // ==============================================================================
+  // STREAM PRESETS: ⚡ LOW LATENCY, 💎 QUALITY, & 🎛️ CUSTOM
+  // ==============================================================================
+  function applyStreamPreset(preset, notify = true) {
+    state.streamPreset = preset;
+    [dom.presetLow, dom.presetQuality, dom.presetCustom].forEach(b => {
+      if (b) b.classList.remove('active');
+    });
+
+    if (preset === 'low') {
+      if (dom.presetLow) dom.presetLow.classList.add('active');
+      if (dom.customStreamControls) dom.customStreamControls.classList.add('hidden');
+      state.scale = 0.50;
+      state.quality = 42;
+      state.fps = 30;
+      state.subsampling = 2; // 4:2:0 fast subsampling
+      state.delta_skip = true; // smart frame deduplication
+
+      dom.scaleSlider.value = 0.50;
+      dom.scaleLabel.textContent = "50%";
+      dom.qualitySlider.value = 42;
+      dom.qualityLabel.textContent = "42%";
+      dom.fpsSlider.value = 30;
+      dom.fpsLabel.textContent = "30 FPS";
+
+      sendStreamConfig({
+        scale: 0.50,
+        quality: 42,
+        fps: 30,
+        subsampling: 2,
+        delta_skip: true
+      });
+      if (notify) showToast("⚡ Low-Latency Active (30 FPS, Bandwidth Saver)");
+    } else if (preset === 'quality') {
+      if (dom.presetQuality) dom.presetQuality.classList.add('active');
+      if (dom.customStreamControls) dom.customStreamControls.classList.add('hidden');
+      state.scale = 1.0;
+      state.quality = 85;
+      state.fps = 20;
+      state.subsampling = 0; // 4:4:4 crisp text edges
+      state.delta_skip = false;
+
+      dom.scaleSlider.value = 1.0;
+      dom.scaleLabel.textContent = "100%";
+      dom.qualitySlider.value = 85;
+      dom.qualityLabel.textContent = "85%";
+      dom.fpsSlider.value = 20;
+      dom.fpsLabel.textContent = "20 FPS";
+
+      sendStreamConfig({
+        scale: 1.0,
+        quality: 85,
+        fps: 20,
+        subsampling: 0,
+        delta_skip: false
+      });
+      if (notify) showToast("💎 High-Quality Active (100% Scale, 4:4:4 Sharp Text)");
+    } else if (preset === 'custom') {
+      if (dom.presetCustom) dom.presetCustom.classList.add('active');
+      if (dom.customStreamControls) dom.customStreamControls.classList.remove('hidden');
+      sendStreamConfig({
+        scale: state.scale,
+        quality: state.quality,
+        fps: state.fps,
+        subsampling: state.subsampling,
+        delta_skip: state.delta_skip
+      });
+      if (notify) showToast("🎛️ Custom Stream Tuning Active");
+    }
+  }
+
+  if (dom.presetLow) dom.presetLow.addEventListener('click', () => applyStreamPreset('low'));
+  if (dom.presetQuality) dom.presetQuality.addEventListener('click', () => applyStreamPreset('quality'));
+  if (dom.presetCustom) dom.presetCustom.addEventListener('click', () => applyStreamPreset('custom'));
+
+  // If user adjusts manual sliders while on a preset, auto-shift to custom
+  [dom.scaleSlider, dom.qualitySlider, dom.fpsSlider].forEach(slider => {
+    slider.addEventListener('input', () => {
+      if (state.streamPreset !== 'custom') {
+        state.streamPreset = 'custom';
+        [dom.presetLow, dom.presetQuality, dom.presetCustom].forEach(b => {
+          if (b) b.classList.remove('active');
+        });
+        if (dom.presetCustom) dom.presetCustom.classList.add('active');
+        if (dom.customStreamControls) dom.customStreamControls.classList.remove('hidden');
+      }
+    });
+  });
+
+  // ==============================================================================
+  // PUBG-STYLE FLOATING MOUSE TRIGGERS & CUSTOMIZABLE HUD EDITOR
+  // ==============================================================================
+  const DEFAULT_HUD_CONFIG = {
+    visible: true,
+    size: 100,
+    opacity: 85,
+    elements: {
+      lclick: { left: 8, top: 62 },
+      rclick: { left: 8, top: 48 },
+      dblclick: { left: 8, top: 36 },
+      scroll: { left: 88, top: 52 }
+    }
+  };
+
+  // Load layout from localStorage
+  try {
+    const savedHud = localStorage.getItem('reni_custom_hud_v3');
+    if (savedHud) {
+      const parsed = JSON.parse(savedHud);
+      state.hudConfig = {
+        visible: parsed.visible !== undefined ? parsed.visible : true,
+        size: parsed.size || 100,
+        opacity: parsed.opacity || 85,
+        elements: Object.assign({}, DEFAULT_HUD_CONFIG.elements, parsed.elements || {})
+      };
+    }
+  } catch (err) {
+    state.hudConfig = JSON.parse(JSON.stringify(DEFAULT_HUD_CONFIG));
+  }
+
+  function applyHudLayout() {
+    if (!dom.hudTriggersLayer) return;
+
+    dom.hudTriggersLayer.style.display = state.hudConfig.visible ? 'block' : 'none';
+    dom.hudTriggersLayer.style.opacity = (state.hudConfig.opacity / 100).toString();
+
+    const scaleFactor = state.hudConfig.size / 100;
+    const elementsMap = {
+      lclick: dom.hudTriggerLClick,
+      rclick: dom.hudTriggerRClick,
+      dblclick: dom.hudTriggerDblClick,
+      scroll: dom.hudTriggerScroll
+    };
+
+    Object.keys(elementsMap).forEach(key => {
+      const el = elementsMap[key];
+      const pos = state.hudConfig.elements[key];
+      if (el && pos) {
+        el.style.left = `${pos.left}%`;
+        el.style.top = `${pos.top}%`;
+        el.style.transform = `scale(${scaleFactor})`;
+      }
+    });
+
+    if (dom.toggleHudTriggers) dom.toggleHudTriggers.checked = state.hudConfig.visible;
+    if (dom.hudVisibleToggle) dom.hudVisibleToggle.checked = state.hudConfig.visible;
+    if (dom.hudSizeSlider) {
+      dom.hudSizeSlider.value = state.hudConfig.size;
+      dom.hudSizeVal.textContent = `${state.hudConfig.size}%`;
+    }
+    if (dom.hudOpacitySlider) {
+      dom.hudOpacitySlider.value = state.hudConfig.opacity;
+      dom.hudOpacityVal.textContent = `${state.hudConfig.opacity}%`;
+    }
+  }
+
+  // Trigger Interactions (Hold-drag capable Left-click, Instant Right-click, 1-tap Double-click, Scroll)
+  let lclickStartTime = 0;
+  let lastLClickTapTime = 0;
+  let isHudEditing = false;
+  let draggingHudKey = null;
+
+  function bindHudTriggerActions() {
+    // L-CLICK: Tap (click), Double-tap (double-click), Hold (mouse_down) + Move on trackpad (drag)
+    if (dom.hudTriggerLClick) {
+      const handleDown = (e) => {
+        if (isHudEditing) return;
+        e.preventDefault();
+        e.stopPropagation();
+        lclickStartTime = Date.now();
+        state.isHoldingLClick = true;
+        dom.hudTriggerLClick.classList.add('active');
+        sendControl({
+          type: "mouse_down",
+          button: "left",
+          modifiers: Array.from(state.stickyModifiers)
+        });
+      };
+
+      const handleUp = (e) => {
+        if (isHudEditing) return;
+        e.preventDefault();
+        e.stopPropagation();
+        state.isHoldingLClick = false;
+        dom.hudTriggerLClick.classList.remove('active');
+        sendControl({
+          type: "mouse_up",
+          button: "left",
+          modifiers: Array.from(state.stickyModifiers)
+        });
+
+        const elapsed = Date.now() - lclickStartTime;
+        const now = Date.now();
+        if (elapsed < 280) {
+          if (now - lastLClickTapTime < 320) {
+            sendControl({
+              type: "mouse_click",
+              button: "left",
+              double: true,
+              modifiers: Array.from(state.stickyModifiers)
+            });
+            lastLClickTapTime = 0;
+          } else {
+            lastLClickTapTime = now;
+          }
+        }
+      };
+
+      dom.hudTriggerLClick.addEventListener('touchstart', handleDown, { passive: false });
+      dom.hudTriggerLClick.addEventListener('touchend', handleUp, { passive: false });
+      dom.hudTriggerLClick.addEventListener('mousedown', handleDown);
+      dom.hudTriggerLClick.addEventListener('mouseup', handleUp);
+    }
+
+    // R-CLICK: Instant Right Click
+    if (dom.hudTriggerRClick) {
+      const handleRClick = (e) => {
+        if (isHudEditing) return;
+        e.preventDefault();
+        e.stopPropagation();
+        sendControl({
+          type: "mouse_click",
+          button: "right",
+          modifiers: Array.from(state.stickyModifiers)
+        });
+        dom.hudTriggerRClick.classList.add('active');
+        setTimeout(() => dom.hudTriggerRClick.classList.remove('active'), 120);
+      };
+      dom.hudTriggerRClick.addEventListener('touchstart', handleRClick, { passive: false });
+      dom.hudTriggerRClick.addEventListener('click', handleRClick);
+    }
+
+    // DBL-CLK: Dedicated 1-Tap Double Click
+    if (dom.hudTriggerDblClick) {
+      const handleDblClick = (e) => {
+        if (isHudEditing) return;
+        e.preventDefault();
+        e.stopPropagation();
+        sendControl({
+          type: "mouse_click",
+          button: "left",
+          double: true,
+          modifiers: Array.from(state.stickyModifiers)
+        });
+        dom.hudTriggerDblClick.classList.add('active');
+        setTimeout(() => dom.hudTriggerDblClick.classList.remove('active'), 120);
+      };
+      dom.hudTriggerDblClick.addEventListener('touchstart', handleDblClick, { passive: false });
+      dom.hudTriggerDblClick.addEventListener('click', handleDblClick);
+    }
+
+    // SCROLL ▲ / ▼ ROCKER
+    if (dom.hudScrollUp) {
+      const handleScrollUp = (e) => {
+        if (isHudEditing) return;
+        e.preventDefault();
+        e.stopPropagation();
+        sendControl({ type: "mouse_scroll", dy: -120 });
+      };
+      dom.hudScrollUp.addEventListener('touchstart', handleScrollUp, { passive: false });
+      dom.hudScrollUp.addEventListener('click', handleScrollUp);
+    }
+
+    if (dom.hudScrollDown) {
+      const handleScrollDown = (e) => {
+        if (isHudEditing) return;
+        e.preventDefault();
+        e.stopPropagation();
+        sendControl({ type: "mouse_scroll", dy: 120 });
+      };
+      dom.hudScrollDown.addEventListener('touchstart', handleScrollDown, { passive: false });
+      dom.hudScrollDown.addEventListener('click', handleScrollDown);
+    }
+  }
+
+  // HUD Layout Customizer Drag & Drop Mode
+  function enterHudEditMode() {
+    isHudEditing = true;
+    if (dom.hudEditorOverlay) dom.hudEditorOverlay.classList.remove('hidden');
+    if (dom.hudTriggersLayer) {
+      dom.hudTriggersLayer.classList.add('in-edit-mode');
+      dom.hudTriggersLayer.style.display = 'block';
+    }
+    if (dom.settingsDrawer) dom.settingsDrawer.classList.remove('open');
+    showToast("🎯 Drag triggers anywhere to customize layout");
+  }
+
+  function exitHudEditMode() {
+    isHudEditing = false;
+    if (dom.hudEditorOverlay) dom.hudEditorOverlay.classList.add('hidden');
+    if (dom.hudTriggersLayer) {
+      dom.hudTriggersLayer.classList.remove('in-edit-mode');
+      dom.hudTriggersLayer.style.display = state.hudConfig.visible ? 'block' : 'none';
+    }
+  }
+
+  function setupHudDragHandlers() {
+    const triggerMap = {
+      lclick: dom.hudTriggerLClick,
+      rclick: dom.hudTriggerRClick,
+      dblclick: dom.hudTriggerDblClick,
+      scroll: dom.hudTriggerScroll
+    };
+
+    Object.keys(triggerMap).forEach(key => {
+      const el = triggerMap[key];
+      if (!el) return;
+
+      const onStart = (e) => {
+        if (!isHudEditing) return;
+        e.preventDefault();
+        e.stopPropagation();
+        draggingHudKey = key;
+        el.classList.add('selected');
+      };
+
+      el.addEventListener('touchstart', onStart, { passive: false });
+      el.addEventListener('mousedown', onStart);
+    });
+
+    const onMove = (e) => {
+      if (!isHudEditing || !draggingHudKey) return;
+      e.preventDefault();
+
+      const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+      const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+
+      const leftPct = Math.max(2, Math.min(94, (clientX / window.innerWidth) * 100));
+      const topPct = Math.max(5, Math.min(94, (clientY / window.innerHeight) * 100));
+
+      state.hudConfig.elements[draggingHudKey] = {
+        left: Math.round(leftPct),
+        top: Math.round(topPct)
+      };
+      applyHudLayout();
+    };
+
+    const onEnd = () => {
+      if (draggingHudKey) {
+        const el = triggerMap[draggingHudKey];
+        if (el) el.classList.remove('selected');
+        draggingHudKey = null;
+      }
+    };
+
+    window.addEventListener('touchmove', onMove, { passive: false });
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('touchend', onEnd);
+    window.addEventListener('mouseup', onEnd);
+  }
+
+  // HUD Editor UI Controls
+  if (dom.btnOpenHudEditor) dom.btnOpenHudEditor.addEventListener('click', enterHudEditMode);
+  if (dom.btnHudClose) dom.btnHudClose.addEventListener('click', exitHudEditMode);
+
+  if (dom.btnHudSave) {
+    dom.btnHudSave.addEventListener('click', () => {
+      try {
+        localStorage.setItem('reni_custom_hud_v3', JSON.stringify(state.hudConfig));
+        showToast("💾 Custom HUD Layout Saved");
+      } catch (e) {}
+      exitHudEditMode();
+    });
+  }
+
+  if (dom.btnHudReset) {
+    dom.btnHudReset.addEventListener('click', () => {
+      state.hudConfig = JSON.parse(JSON.stringify(DEFAULT_HUD_CONFIG));
+      applyHudLayout();
+      try {
+        localStorage.setItem('reni_custom_hud_v3', JSON.stringify(state.hudConfig));
+      } catch (e) {}
+      showToast("↺ Reset to Default Layout");
+    });
+  }
+
+  if (dom.hudSizeSlider) {
+    dom.hudSizeSlider.addEventListener('input', (e) => {
+      state.hudConfig.size = parseInt(e.target.value);
+      dom.hudSizeVal.textContent = `${state.hudConfig.size}%`;
+      applyHudLayout();
+    });
+  }
+
+  if (dom.hudOpacitySlider) {
+    dom.hudOpacitySlider.addEventListener('input', (e) => {
+      state.hudConfig.opacity = parseInt(e.target.value);
+      dom.hudOpacityVal.textContent = `${state.hudConfig.opacity}%`;
+      applyHudLayout();
+    });
+  }
+
+  if (dom.hudVisibleToggle) {
+    dom.hudVisibleToggle.addEventListener('change', (e) => {
+      state.hudConfig.visible = e.target.checked;
+      applyHudLayout();
+    });
+  }
+
+  if (dom.toggleHudTriggers) {
+    dom.toggleHudTriggers.addEventListener('change', (e) => {
+      state.hudConfig.visible = e.target.checked;
+      applyHudLayout();
+      try {
+        localStorage.setItem('reni_custom_hud_v3', JSON.stringify(state.hudConfig));
+      } catch (e) {}
+    });
+  }
+
+  bindHudTriggerActions();
+  setupHudDragHandlers();
+  applyHudLayout();
 
   dom.btnTriggerWol.addEventListener('click', async () => {
     const mac = dom.wolMacInput.value.trim();
