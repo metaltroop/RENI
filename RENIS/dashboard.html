@@ -432,6 +432,32 @@
 
   <div id="toast" class="toast hidden"></div>
 
+  <script>
+    const dom = {
+      urlSelector: document.getElementById('url-selector'),
+      qrTarget: document.getElementById('qr-target'),
+      activeUrl: document.getElementById('active-url'),
+      btnCopyUrl: document.getElementById('btn-copy-url'),
+      metricCpu: document.getElementById('metric-cpu'),
+      metricCpuSub: document.getElementById('metric-cpu-sub'),
+      metricRam: document.getElementById('metric-ram'),
+      metricRamSub: document.getElementById('metric-ram-sub'),
+      metricStreams: document.getElementById('metric-streams'),
+      metricControls: document.getElementById('metric-controls'),
+      btnPowercfgLid: document.getElementById('btn-powercfg-lid'),
+      btnKillSessions: document.getElementById('btn-kill-sessions'),
+      toast: document.getElementById('toast')
+    };
+
+    let discoveredUrls = [];
+    let currentUrl = '';
+
+    function showToast(msg) {
+      dom.toast.textContent = msg;
+      dom.toast.classList.remove('hidden');
+      setTimeout(() => dom.toast.classList.add('hidden'), 2500);
+    }
+
     function renderQR(url) {
       currentUrl = url;
       dom.activeUrl.textContent = url;
