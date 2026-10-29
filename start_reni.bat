@@ -5,9 +5,9 @@ setlocal
 :: Always change directory to project root immediately
 cd /d "%~dp0"
 
-title RENI // HOST SYSTEM CONTROL CENTER (v3.0)
+title RENI // HOST SYSTEM CONTROL CENTER (v3.1.0-beta)
 echo ==============================================================================
-echo   R.E.N.I.S. // HOST CONTROL CENTER AND UNIVERSAL TUNNEL MANAGER (v3.0)
+echo   R.E.N.I.S. // HOST CONTROL CENTER AND UNIVERSAL TUNNEL MANAGER (v3.1.0-beta)
 echo ==============================================================================
 
 :: Parse command line flags

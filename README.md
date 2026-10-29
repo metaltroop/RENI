@@ -1,15 +1,15 @@
-# PROJECT RENI // REMOTE SYSTEM ACCESS (RENIS & RENIC) v3.0
+# PROJECT RENI // REMOTE SYSTEM ACCESS (RENIS & RENIC) v3.1.0-beta
 
 [![Platform](https://img.shields.io/badge/Platform-Windows%2010%20%7C%2011%20(Elevated)-0078D6?style=for-the-badge&logo=windows)](https://github.com/metaltroop/RENI)
 [![Architecture](https://img.shields.io/badge/Architecture-FastAPI%20%7B%7D%20MSS%20%7B%7D%20PWA-FF0033?style=for-the-badge)](https://github.com/metaltroop/RENI)
-[![Security](https://img.shields.io/badge/Security-W3C%20WebAuthn%20%7C%20JWT%20%7C%20PBKDF2-00F0FF?style=for-the-badge)](https://github.com/metaltroop/RENI)
-[![License](https://img.shields.io/badge/License-MIT-39FF14?style=for-the-badge)](LICENSE)
+[![Security](https://img.shields.io/badge/Security-W3C%20WebAuthn%20%7C%20JWT%20%7C%20PBKDF2%20%7C%20RateLimit-00F0FF?style=for-the-badge)](https://github.com/metaltroop/RENI)
+[![Release](https://img.shields.io/badge/Release-v3.1.0--beta-39FF14?style=for-the-badge)](https://github.com/metaltroop/RENI)
 
-> **RENI** (*Remote Network Interface*) is a high-performance, secure, self-hosted Remote Desktop and Administrative Control Monorepo engineered specifically for performance workstations and gaming laptops. It delivers low-latency desktop streaming, precision touch control, PUBG-style customizable HUD mouse triggers, zoom lock, elevated UAC bypass architecture, 2-way text & screenshot clipboard synchronization, a native Windows Desktop GUI Control Center, and universal zero-setup Cloudflare Tunnel onboarding with zero third-party cloud dependencies.
+> **RENI** (*Remote Network Interface*) is a high-performance, secure, self-hosted Remote Desktop and Administrative Control Monorepo engineered specifically for performance workstations and gaming laptops. It delivers low-latency desktop streaming, precision touch control, PUBG-style customizable HUD mouse triggers, zoom lock, elevated UAC bypass architecture, true void-black hardware privacy screen, 2-way text & screenshot clipboard synchronization, a native Windows Desktop GUI Control Center with living pulse telemetry, and universal zero-setup Cloudflare Tunnel onboarding with zero third-party cloud dependencies.
 
 ---
 
-## ⚡ ARCHITECTURE OVERVIEW (v3.0)
+## ⚡ ARCHITECTURE OVERVIEW (v3.1.0-beta)
 
 ```text
 RENI/
@@ -137,18 +137,28 @@ The system features an industrial Cyberpunk design optimized for OLED smartphone
 * **Tactical Shortcut Dock:**
   * Dedicated macros for **Task View** (`Win+Tab`), **Task Manager** (`Ctrl+Shift+Esc`), `Alt+Tab`, `Alt+F4`, `Enter`, `Esc`, `Tab`, and `Win`.
 
-### 9. Elevated Remote PowerShell Terminal Drawer (`/ws/terminal`)
+### 9. True Void-Black Hardware Privacy Screen (`WDA_EXCLUDEFROMCAPTURE` + WMI Backlight Dimming)
+* Unlike standard DPMS sleep commands (`SC_MONITORPOWER`), which cut off GPU composition (causing the remote stream to go black and waking the physical screen on every mouse movement), RENI implements a commercial-grade privacy engine:
+  * **Topmost Exclude-From-Capture Window:** Renders a 100% pure void black surface (`RGB(0, 0, 0)`) across all physical monitors.
+  * **`WDA_EXCLUDEFROMCAPTURE` (`0x00000011`):** Instructs Windows DWM to omit the blackout window from screen captures, allowing the phone client to stream the real desktop at 60 FPS without interruption.
+  * **Zero Backlight Glow:** Dims the physical laptop panel backlight to 0% via WMI (`WmiSetBrightness(0, 0)`) to eliminate LCD backlight glow.
+  * **Click-Through & Anti-Wake:** Synthetic mouse movements, drag-and-drop, and keystrokes from your phone pass directly through to desktop apps without waking or disrupting the physical blackout.
+
+### 10. Silent Remote Auto-Elevation Architecture & Win32 Input Injection
+* Standard remote access software gets blocked by Windows UIPI when interacting with administrative setup wizards and UAC dialogs.
+* `setup_renis_admin.bat` and `renis_gui.py` automatically configure:
+  ```reg
+  HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System -> PromptOnSecureDesktop = 0
+  HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System -> ConsentPromptBehaviorAdmin = 0
+  HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System -> EnableUIADesktopToggle = 1
+  ```
+* **Silent Auto-Elevation:** Setups, `.msi` installers, and elevated tools run immediately without modal `consent.exe` input blocks. Both `renis_server.py` and the setup wizard run at High Integrity, enabling 100% remote touch, click, scroll, and drag control through any installation wizard.
+* **Direct Win32 Hardware Input Injector:** Native `user32.mouse_event`, `SetCursorPos`, and `keybd_event` bypass Python coordinate errors and failsafe exceptions, feeding synthetic input directly into the Windows hardware queue.
+
+### 11. Elevated Remote PowerShell Terminal Drawer (`/ws/terminal`)
 * Slide-up **Admin Shell Drawer** connected via real-time WebSocket to an elevated Windows `powershell.exe` instance.
 * Run software installations (`winget install ...`, `choco`), query processes, manage services, and execute maintenance scripts directly from your phone.
 * Includes one-tap macro chips (`winget upgrade`, `top cpu`, `services`, `ipconfig`) and a dedicated `^C` interrupt trigger.
-
-### 10. Windows UAC Bypass Architecture
-* Standard remote tools go black when Windows opens a User Account Control elevation prompt on the isolated `Winlogon` desktop.
-* `setup_renis_admin.bat` automatically configures:
-  ```reg
-  HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System -> PromptOnSecureDesktop = 0
-  ```
-* UAC elevation dialogs render directly on the interactive desktop, allowing full visibility and click-through capability remotely from your phone.
 
 ---
 

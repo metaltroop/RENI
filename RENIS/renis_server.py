@@ -91,6 +91,7 @@ RENI_BANNER = r"""
   ╚═╝  ╚═╝    ╚══════╝    ╚═╝  ╚═══╝    ╚═╝
   ══════════════════════════════════════════════
   >> R.E.N.I. // REMOTE SYSTEM CONTROL SERVER <<
+  >>        VERSION 3.1.0-BETA RELEASE        <<
   ══════════════════════════════════════════════
 """
 
@@ -839,8 +840,8 @@ def verify_local_or_auth(request: Request) -> bool:
     hostname = request.url.hostname or ""
     client_host = request.client.host if request.client else ""
 
-    # Strictly direct localhost access (not proxied over internet / tunnel)
-    if not is_proxied and (hostname in ["localhost", "127.0.0.1", "::1"] or client_host in ["127.0.0.1", "::1"]):
+    # Strictly direct localhost access: hostname must be localhost/127.0.0.1, client_host must be local, and no proxy headers
+    if not is_proxied and hostname in ["localhost", "127.0.0.1", "::1"] and client_host in ["127.0.0.1", "::1", "localhost"]:
         return True
 
     # Check for Bearer token in Authorization header or ?token= query parameter
@@ -1028,12 +1029,43 @@ async def set_uac_policy(request: Request, payload: Dict[str, Any] = Body(...)):
         raise HTTPException(status_code=400, detail=res.get("message") or res.get("error", "Failed to update UAC policy"))
     return res
 
+# IP-based PIN Anti-Bruteforce Lockout Store
+LOGIN_ATTEMPTS: Dict[str, Dict[str, Any]] = {}
+
+def check_login_rate_limit(client_ip: str) -> None:
+    now = time.time()
+    record = LOGIN_ATTEMPTS.get(client_ip)
+    if record:
+        if now < record.get("locked_until", 0):
+            remaining = int(record["locked_until"] - now)
+            raise HTTPException(
+                status_code=429,
+                detail=f"Security Lockout: Too many failed PIN attempts. IP blocked for {remaining}s."
+            )
+        elif now > record.get("locked_until", 0) + 300:
+            LOGIN_ATTEMPTS.pop(client_ip, None)
+
+def record_failed_login(client_ip: str) -> None:
+    now = time.time()
+    record = LOGIN_ATTEMPTS.setdefault(client_ip, {"count": 0, "locked_until": 0})
+    record["count"] += 1
+    if record["count"] >= 5:
+        lockout = 300 if record["count"] >= 10 else 60
+        record["locked_until"] = now + lockout
+        print(f"[!] [SECURITY] IP {client_ip} exceeded PIN attempts ({record['count']}). Locked out for {lockout}s.")
+
+def record_successful_login(client_ip: str) -> None:
+    LOGIN_ATTEMPTS.pop(client_ip, None)
+
 # ==============================================================================
 # REST API: AUTHENTICATION & WEBAUTHN
 # ==============================================================================
 @app.post("/api/auth/login-pin")
-async def login_with_pin(payload: Dict[str, str]):
-    """Authenticates the client using the 6-digit Master PIN."""
+async def login_with_pin(payload: Dict[str, str], request: Request):
+    """Authenticates the client using the 6-digit Master PIN with anti-bruteforce defense."""
+    client_ip = request.headers.get("cf-connecting-ip") or request.headers.get("x-forwarded-for") or (request.client.host if request.client else "unknown")
+    check_login_rate_limit(client_ip)
+
     pin = payload.get("pin", "")
     if not pin or len(pin) < 4:
         raise HTTPException(status_code=400, detail="Invalid PIN format")
@@ -1043,6 +1075,7 @@ async def login_with_pin(payload: Dict[str, str]):
     computed_hash = hash_pin(pin, salt)
 
     if hmac.compare_digest(computed_hash, expected_hash):
+        record_successful_login(client_ip)
         AUTH_DATA["last_login"] = time.time()
         save_auth_store()
         token = create_jwt_token("master_pin_user")
@@ -1055,7 +1088,8 @@ async def login_with_pin(payload: Dict[str, str]):
             "message": "Authentication successful"
         }
     else:
-        await asyncio.sleep(0.5) # Anti-bruteforce delay
+        record_failed_login(client_ip)
+        await asyncio.sleep(0.5) # Anti-bruteforce jitter delay
         raise HTTPException(status_code=401, detail="Invalid Master PIN")
 
 @app.post("/api/auth/change-pin")
@@ -1289,7 +1323,61 @@ class PrivacyCurtainManager:
             return
 
         user32 = ctypes.windll.user32
+        gdi32 = ctypes.windll.gdi32
         kernel32 = ctypes.windll.kernel32
+
+        # Create pure void black brush (RGB 0, 0, 0)
+        black_brush = gdi32.CreateSolidBrush(0x00000000)
+
+        WNDPROC = ctypes.WINFUNCTYPE(wintypes.LPARAM, wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM)
+
+        def curtain_wnd_proc(hwnd, msg, wparam, lparam):
+            if msg == 0x0014: # WM_ERASEBKGND
+                hdc = wintypes.HDC(wparam)
+                rect = wintypes.RECT()
+                user32.GetClientRect(hwnd, ctypes.byref(rect))
+                user32.FillRect(hdc, ctypes.byref(rect), black_brush)
+                return 1
+            elif msg == 0x000F: # WM_PAINT
+                ps = (wintypes.BYTE * 72)()
+                hdc = user32.BeginPaint(hwnd, ctypes.byref(ps))
+                rect = wintypes.RECT()
+                user32.GetClientRect(hwnd, ctypes.byref(rect))
+                user32.FillRect(hdc, ctypes.byref(rect), black_brush)
+                user32.EndPaint(hwnd, ctypes.byref(ps))
+                return 0
+            return user32.DefWindowProcW(hwnd, msg, wparam, lparam)
+
+        self._curtain_cb = WNDPROC(curtain_wnd_proc)
+
+        class WNDCLASSEXW(ctypes.Structure):
+            _fields_ = [
+                ('cbSize', wintypes.UINT),
+                ('style', wintypes.UINT),
+                ('lpfnWndProc', WNDPROC),
+                ('cbClsExtra', ctypes.c_int),
+                ('cbWndExtra', ctypes.c_int),
+                ('hInstance', wintypes.HINSTANCE),
+                ('hIcon', wintypes.HICON),
+                ('hCursor', wintypes.HCURSOR),
+                ('hbrBackground', wintypes.HBRUSH),
+                ('lpszMenuName', wintypes.LPCWSTR),
+                ('lpszClassName', wintypes.LPCWSTR),
+                ('hIconSm', wintypes.HICON),
+            ]
+
+        hinstance = kernel32.GetModuleHandleW(None)
+        class_name = f"RENI_VoidBlackCurtain_{os.getpid()}"
+
+        wc = WNDCLASSEXW()
+        wc.cbSize = ctypes.sizeof(WNDCLASSEXW)
+        wc.style = 0x0003 # CS_HREDRAW | CS_VREDRAW
+        wc.lpfnWndProc = self._curtain_cb
+        wc.hInstance = hinstance
+        wc.hbrBackground = black_brush
+        wc.lpszClassName = class_name
+
+        user32.RegisterClassExW(ctypes.byref(wc))
 
         user32.CreateWindowExW.argtypes = [
             wintypes.DWORD, wintypes.LPCWSTR, wintypes.LPCWSTR, wintypes.DWORD,
@@ -1313,7 +1401,6 @@ class PrivacyCurtainManager:
 
         WS_POPUP = 0x80000000
         WS_VISIBLE = 0x10000000
-        SS_BLACKRECT = 0x00000004
 
         WS_EX_TOPMOST = 0x00000008
         WS_EX_TOOLWINDOW = 0x00000080
@@ -1322,13 +1409,11 @@ class PrivacyCurtainManager:
         WS_EX_NOACTIVATE = 0x08000000
         WDA_EXCLUDEFROMCAPTURE = 0x00000011
 
-        hinstance = kernel32.GetModuleHandleW(None)
-
         self.hwnd = user32.CreateWindowExW(
             WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE,
-            'static',
+            class_name,
             'RENI_PrivacyCurtain',
-            WS_POPUP | WS_VISIBLE | SS_BLACKRECT,
+            WS_POPUP | WS_VISIBLE,
             x, y, w, h,
             None, None, hinstance, None
         )
@@ -1354,6 +1439,8 @@ class PrivacyCurtainManager:
         if self.hwnd:
             user32.DestroyWindow(self.hwnd)
             self.hwnd = None
+        user32.UnregisterClassW(class_name, hinstance)
+        gdi32.DeleteObject(black_brush)
 
     def enable(self):
         if self.active:
@@ -1370,7 +1457,7 @@ class PrivacyCurtainManager:
             pass
 
         self.active = True
-        print("[+] [Privacy] Physical Monitor Blackout Curtain ENABLED (Physical screen blanked, remote streaming active).")
+        print("[+] [Privacy] Physical Monitor Blackout Curtain ENABLED (Pure Void Black, remote streaming active).")
         return True
 
     def disable(self):
@@ -1397,15 +1484,18 @@ class PrivacyCurtainManager:
             out = subprocess.check_output(cmd, shell=True, timeout=2).decode().strip()
             if out.isdigit():
                 self.original_brightness = int(out)
-                set_cmd = 'powershell -NoProfile -Command "(Get-WmiObject -Namespace root/wmi -Class WmiMonitorBrightnessMethods).WmiSetBrightness(1, 0)"'
-                subprocess.Popen(set_cmd, shell=True)
+        except Exception:
+            pass
+        try:
+            set_cmd = 'powershell -NoProfile -Command "(Get-WmiObject -Namespace root/wmi -Class WmiMonitorBrightnessMethods).WmiSetBrightness(0, 0)"'
+            subprocess.Popen(set_cmd, shell=True)
         except Exception:
             pass
 
     def _restore_backlight(self):
         try:
             target = self.original_brightness if self.original_brightness is not None else 100
-            set_cmd = f'powershell -NoProfile -Command "(Get-WmiObject -Namespace root/wmi -Class WmiMonitorBrightnessMethods).WmiSetBrightness(1, {target})"'
+            set_cmd = f'powershell -NoProfile -Command "(Get-WmiObject -Namespace root/wmi -Class WmiMonitorBrightnessMethods).WmiSetBrightness(0, {target})"'
             subprocess.Popen(set_cmd, shell=True)
         except Exception:
             pass

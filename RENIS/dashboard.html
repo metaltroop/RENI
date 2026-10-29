@@ -235,7 +235,11 @@
       align-items: center;
       justify-content: center;
       gap: 6px;
-      transition: all 0.2s;
+      transition: transform 0.12s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.2s ease, background 0.2s ease, border-color 0.2s ease;
+    }
+
+    .btn:active {
+      transform: scale(0.96);
     }
 
     .btn-cyan {
@@ -485,6 +489,9 @@
           <button class="btn btn-secondary" id="btn-toggle-uac" title="Enable silent auto-elevation so setup wizards and installers run without modal input blocks">
             <span id="lbl-uac-btn">⚡ Auto-Elevation: Checking...</span>
           </button>
+          <button class="btn btn-secondary" id="btn-toggle-blackout" title="Toggle physical screen blackout for privacy while remote streaming stays active">
+            <span id="lbl-blackout-btn">🌑 Privacy Monitor Blackout</span>
+          </button>
           <button class="btn btn-secondary" id="btn-powercfg-lid">
             <span>🌙 Enable 24/7 Always-On (Lid-Closed Do Nothing)</span>
           </button>
@@ -512,6 +519,8 @@
       metricControls: document.getElementById('metric-controls'),
       btnToggleUac: document.getElementById('btn-toggle-uac'),
       lblUacBtn: document.getElementById('lbl-uac-btn'),
+      btnToggleBlackout: document.getElementById('btn-toggle-blackout'),
+      lblBlackoutBtn: document.getElementById('lbl-blackout-btn'),
       btnPowercfgLid: document.getElementById('btn-powercfg-lid'),
       btnKillSessions: document.getElementById('btn-kill-sessions'),
       toast: document.getElementById('toast'),
@@ -800,6 +809,36 @@
           checkUacPolicy();
         } catch (e) {
           showToast('Failed to toggle UAC policy');
+        }
+      });
+    }
+
+    let currentBlackout = false;
+
+    if (dom.btnToggleBlackout) {
+      dom.btnToggleBlackout.addEventListener('click', async () => {
+        try {
+          const res = await fetch('/api/power/blackout', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ state: !currentBlackout })
+          });
+          const data = await res.json();
+          currentBlackout = !!data.blackout;
+          showToast(data.message || 'Blackout Toggled');
+          if (dom.lblBlackoutBtn) {
+            if (currentBlackout) {
+              dom.lblBlackoutBtn.textContent = '🌑 Blackout: ACTIVE (Screen Void Black)';
+              dom.btnToggleBlackout.style.borderColor = 'var(--accent-red)';
+              dom.btnToggleBlackout.style.color = 'var(--accent-red)';
+            } else {
+              dom.lblBlackoutBtn.textContent = '🌑 Privacy Monitor Blackout';
+              dom.btnToggleBlackout.style.borderColor = 'var(--border-subtle)';
+              dom.btnToggleBlackout.style.color = '#FFFFFF';
+            }
+          }
+        } catch (e) {
+          showToast('Failed to toggle blackout');
         }
       });
     }

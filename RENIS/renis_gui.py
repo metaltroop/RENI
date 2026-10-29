@@ -54,7 +54,7 @@ COLOR_BORDER = "#242836"
 class RenisDesktopApp(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("RENIS // Desktop Control Center v3.0")
+        self.title("RENIS // Desktop Control Center (v3.1.0-beta)")
         self.geometry("960x680")
         self.minsize(880, 600)
         self.configure(bg=COLOR_BG)
@@ -135,7 +135,7 @@ class RenisDesktopApp(tk.Tk):
         lbl_logo = tk.Label(title_frame, text="RENIS", font=("Orbitron", 16, "bold"), fg=COLOR_CYAN, bg=COLOR_CARD)
         lbl_logo.pack(side="left")
 
-        lbl_sub = tk.Label(title_frame, text=" // CONTROL CENTER v3.0", font=("Rajdhani", 11, "bold"), fg=COLOR_MUTED, bg=COLOR_CARD)
+        lbl_sub = tk.Label(title_frame, text=" // CONTROL CENTER (v3.1.0-beta)", font=("Rajdhani", 11, "bold"), fg=COLOR_MUTED, bg=COLOR_CARD)
         lbl_sub.pack(side="left", padx=(4, 0))
 
         if self.is_elevated:
@@ -266,6 +266,10 @@ class RenisDesktopApp(tk.Tk):
                               relief="flat", cursor="hand2", padx=10, pady=4, command=self.configure_lid_power)
         btn_power.pack(side="left", padx=6)
 
+        self.btn_blackout = tk.Button(tools_row, text="🌑 Privacy Blackout", bg="#151A24", fg=COLOR_TEXT, font=("Rajdhani", 9, "bold"),
+                                      relief="flat", cursor="hand2", padx=10, pady=4, command=self.toggle_privacy_blackout)
+        self.btn_blackout.pack(side="left", padx=6)
+
         btn_kill = tk.Button(tools_row, text="🛑 Disconnect All", bg="#381115", fg=COLOR_CRIMSON, font=("Rajdhani", 9, "bold"),
                              relief="flat", cursor="hand2", padx=10, pady=4, command=self.kill_all_sessions)
         btn_kill.pack(side="left", padx=6)
@@ -316,17 +320,79 @@ class RenisDesktopApp(tk.Tk):
                                 relief="flat", height=8, wrap="word")
         self.txt_logs.pack(fill="both", expand=True, padx=8, pady=(0, 6))
 
+        # Color syntax tags for system logs
+        self.txt_logs.tag_config("time", foreground="#5E6375")
+        self.txt_logs.tag_config("green", foreground="#39FF14")
+        self.txt_logs.tag_config("cyan", foreground="#00F0FF")
+        self.txt_logs.tag_config("crimson", foreground="#FF0033")
+        self.txt_logs.tag_config("gold", foreground="#FFB800")
+        self.txt_logs.tag_config("white", foreground="#E0E6F0")
+
+        # Subtle Hover Animations
+        self.bind_hover(btn_dash, "#1C2130", "#253147", COLOR_CYAN, "#66F6FF")
+        self.bind_hover(self.btn_srv_toggle, "#103318", "#184D24")
+        self.bind_hover(self.btn_tunnel_toggle, "#112938", "#1A3E54")
+        self.bind_hover(self.btn_tunnel_copy, "#1C2130", "#283042")
+        self.bind_hover(self.btn_uac_auto, "#151A24", "#242C3D")
+        self.bind_hover(btn_power, "#151A24", "#242C3D")
+        self.bind_hover(self.btn_blackout, "#151A24", "#242C3D")
+        self.bind_hover(btn_kill, "#381115", "#541A20")
+        self.bind_hover(btn_copy_qr, "#1C2130", "#253147")
+
         # Initial display
         self.on_tunnel_mode_change()
-        self.log("RENIS Desktop Control Center initialized.")
+        self.log("[*] RENIS Desktop Control Center initialized.")
         self.update_qr_display()
 
-        # Auto-start server on GUI launch
+        # Start Living Pulse Animation & Auto-start server
+        self.pulse_phase = 0
+        self.after(500, self.animate_pulse)
         self.after(500, self.start_server)
+
+    def bind_hover(self, widget, normal_bg, hover_bg, normal_fg=None, hover_fg=None):
+        def on_enter(e):
+            try: widget.config(bg=hover_bg)
+            except Exception: pass
+            if hover_fg:
+                try: widget.config(fg=hover_fg)
+                except Exception: pass
+        def on_leave(e):
+            try: widget.config(bg=normal_bg)
+            except Exception: pass
+            if normal_fg:
+                try: widget.config(fg=normal_fg)
+                except Exception: pass
+        widget.bind("<Enter>", on_enter)
+        widget.bind("<Leave>", on_leave)
+
+    def animate_pulse(self):
+        self.pulse_phase = (self.pulse_phase + 1) % 4
+        # Pulse Server Online Indicator
+        if self.server_proc and self.server_proc.poll() is None:
+            shades_green = ["#39FF14", "#2ED610", "#21AC09", "#2ED610"]
+            try: self.lbl_srv_status.config(fg=shades_green[self.pulse_phase])
+            except Exception: pass
+        # Pulse Tunnel Online Indicator
+        if self.tunnel_proc and self.tunnel_proc.poll() is None:
+            shades_cyan = ["#00F0FF", "#00D4E0", "#00A8B3", "#00D4E0"]
+            try: self.lbl_tunnel_status.config(fg=shades_cyan[self.pulse_phase])
+            except Exception: pass
+        self.after(450, self.animate_pulse)
 
     def log(self, message: str):
         t_str = time.strftime("[%H:%M:%S] ")
-        self.txt_logs.insert(tk.END, t_str + message + "\n")
+        tag = "white"
+        if "[+]" in message or "ONLINE" in message:
+            tag = "green"
+        elif "[*]" in message or "Starting" in message or "Cloudflare" in message:
+            tag = "cyan"
+        elif "[-]" in message or "Error" in message or "Failed" in message or "OFFLINE" in message:
+            tag = "crimson"
+        elif "[!]" in message or "Warning" in message or "Notice" in message:
+            tag = "gold"
+
+        self.txt_logs.insert(tk.END, t_str, "time")
+        self.txt_logs.insert(tk.END, message + "\n", tag)
         self.txt_logs.see(tk.END)
 
     def on_tunnel_mode_change(self):
@@ -646,6 +712,29 @@ class RenisDesktopApp(tk.Tk):
                 self.log("All remote sessions disconnected.")
             except Exception as e:
                 self.log(f"Kill sessions failed: {e}")
+
+    def toggle_privacy_blackout(self):
+        try:
+            port = self.ent_port.get().strip() or str(self.default_port)
+            new_state = not getattr(self, "_blackout_active", False)
+            payload = json.dumps({"state": new_state}).encode('utf-8')
+            req = urllib.request.Request(
+                f"http://127.0.0.1:{port}/api/power/blackout",
+                data=payload,
+                headers={"Content-Type": "application/json"},
+                method="POST"
+            )
+            resp = urllib.request.urlopen(req, timeout=3)
+            data = json.loads(resp.read().decode('utf-8'))
+            self._blackout_active = data.get("blackout", False)
+            if self._blackout_active:
+                self.btn_blackout.config(text="🌑 Blackout: ACTIVE", bg="#381115", fg=COLOR_CRIMSON)
+                self.log("[+] Privacy Blackout ACTIVE: Physical screen is 100% void pitch-black.")
+            else:
+                self.btn_blackout.config(text="🌑 Privacy Blackout", bg="#151A24", fg=COLOR_TEXT)
+                self.log("[+] Privacy Blackout DISABLED: Physical screen restored.")
+        except Exception as e:
+            self.log(f"[-] Blackout toggle error: {e}")
 
     def on_exit(self):
         self.stop_tunnel()
