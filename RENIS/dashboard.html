@@ -482,6 +482,9 @@
         </h3>
 
         <div class="action-deck">
+          <button class="btn btn-secondary" id="btn-toggle-uac" title="Enable silent auto-elevation so setup wizards and installers run without modal input blocks">
+            <span id="lbl-uac-btn">⚡ Auto-Elevation: Checking...</span>
+          </button>
           <button class="btn btn-secondary" id="btn-powercfg-lid">
             <span>🌙 Enable 24/7 Always-On (Lid-Closed Do Nothing)</span>
           </button>
@@ -507,6 +510,8 @@
       metricRamSub: document.getElementById('metric-ram-sub'),
       metricStreams: document.getElementById('metric-streams'),
       metricControls: document.getElementById('metric-controls'),
+      btnToggleUac: document.getElementById('btn-toggle-uac'),
+      lblUacBtn: document.getElementById('lbl-uac-btn'),
       btnPowercfgLid: document.getElementById('btn-powercfg-lid'),
       btnKillSessions: document.getElementById('btn-kill-sessions'),
       toast: document.getElementById('toast'),
@@ -760,6 +765,45 @@
       } catch (err) {}
     }
 
+    let currentAutoElevation = false;
+
+    async function checkUacPolicy() {
+      try {
+        const res = await fetch('/api/server/uac-policy');
+        if (!res.ok) return;
+        const data = await res.json();
+        currentAutoElevation = !!data.auto_elevation_enabled;
+        if (dom.lblUacBtn && dom.btnToggleUac) {
+          if (currentAutoElevation) {
+            dom.lblUacBtn.textContent = '⚡ Auto-Elevation: ACTIVE (Installers & Setups Unlocked)';
+            dom.btnToggleUac.style.borderColor = 'var(--neon-green)';
+            dom.btnToggleUac.style.color = 'var(--neon-green)';
+          } else {
+            dom.lblUacBtn.textContent = '⚠️ Auto-Elevation: DISABLED (Click to Unlock)';
+            dom.btnToggleUac.style.borderColor = 'var(--neon-gold)';
+            dom.btnToggleUac.style.color = 'var(--neon-gold)';
+          }
+        }
+      } catch (err) {}
+    }
+
+    if (dom.btnToggleUac) {
+      dom.btnToggleUac.addEventListener('click', async () => {
+        try {
+          const res = await fetch('/api/server/uac-policy', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ auto_elevation: !currentAutoElevation })
+          });
+          const data = await res.json();
+          showToast(data.message || 'UAC Policy Updated');
+          checkUacPolicy();
+        } catch (e) {
+          showToast('Failed to toggle UAC policy');
+        }
+      });
+    }
+
     dom.btnCopyUrl.addEventListener('click', () => {
       if (currentUrl) {
         navigator.clipboard.writeText(currentUrl).then(() => showToast('Copied: ' + currentUrl));
@@ -791,8 +835,10 @@
 
     pollStatus();
     pollTunnelStatus();
+    checkUacPolicy();
     setInterval(pollStatus, 2000);
     setInterval(pollTunnelStatus, 3000);
+    setInterval(checkUacPolicy, 5000);
   </script>
 </body>
 </html>

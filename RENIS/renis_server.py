@@ -71,7 +71,7 @@ try:
 except ImportError:
     qrcode = None
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends, Query, status, Request
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends, Query, status, Request, Body
 from fastapi.responses import HTMLResponse, FileResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -337,18 +337,78 @@ def get_configured_tunnel_url() -> Optional[str]:
 # ==============================================================================
 # UAC ELEVATION CHECK & AUTO-RESTART
 # ==============================================================================
+def is_process_elevated() -> bool:
+    """Returns True if the current process has Windows Administrator privileges."""
+    if sys.platform != 'win32':
+        return False
+    try:
+        return ctypes.windll.shell32.IsUserAnAdmin() != 0
+    except Exception:
+        return False
+
+def get_windows_uac_policy() -> Dict[str, Any]:
+    """Reads current Windows UAC and Secure Desktop registry policies."""
+    if sys.platform != 'win32':
+        return {"supported": False, "reason": "Not Windows"}
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System", 0, winreg.KEY_READ) as key:
+            prompt_secure, _ = winreg.QueryValueEx(key, "PromptOnSecureDesktop")
+            consent_admin, _ = winreg.QueryValueEx(key, "ConsentPromptBehaviorAdmin")
+            try:
+                uia_toggle, _ = winreg.QueryValueEx(key, "EnableUIADesktopToggle")
+            except Exception:
+                uia_toggle = 0
+            return {
+                "supported": True,
+                "is_elevated": is_process_elevated(),
+                "prompt_on_secure_desktop": prompt_secure,
+                "consent_prompt_behavior_admin": consent_admin,
+                "enable_uia_desktop_toggle": uia_toggle,
+                "auto_elevation_enabled": (consent_admin == 0 and prompt_secure == 0)
+            }
+    except Exception as e:
+        return {"supported": True, "is_elevated": is_process_elevated(), "error": str(e)}
+
+def set_windows_uac_auto_elevation(enable: bool = True) -> Dict[str, Any]:
+    """
+    Configures Windows UAC policies.
+    When enable=True:
+      - PromptOnSecureDesktop = 0 (draws prompts on user desktop for remote viewing)
+      - ConsentPromptBehaviorAdmin = 0 (silent elevation: installers/setups launch directly without consent.exe blocking touch/mouse)
+      - EnableUIADesktopToggle = 1 (assistive UI desktop toggle enabled)
+    When enable=False:
+      - ConsentPromptBehaviorAdmin = 5 (default prompt for consent)
+    """
+    if sys.platform != 'win32':
+        return {"success": False, "message": "Not running on Windows"}
+    if not is_process_elevated():
+        return {"success": False, "message": "Administrator privileges required to modify UAC policy"}
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System", 0, winreg.KEY_SET_VALUE) as key:
+            if enable:
+                winreg.SetValueEx(key, "PromptOnSecureDesktop", 0, winreg.REG_DWORD, 0)
+                winreg.SetValueEx(key, "ConsentPromptBehaviorAdmin", 0, winreg.REG_DWORD, 0)
+                winreg.SetValueEx(key, "EnableUIADesktopToggle", 0, winreg.REG_DWORD, 1)
+                msg = "UAC Silent Auto-Elevation ENABLED: Setups and installers can be remotely controlled without modal input blocks."
+            else:
+                winreg.SetValueEx(key, "ConsentPromptBehaviorAdmin", 0, winreg.REG_DWORD, 5)
+                msg = "UAC Silent Auto-Elevation DISABLED: Windows will prompt for consent on administrative actions."
+        return {"success": True, "auto_elevation_enabled": enable, "message": msg}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
 def check_and_elevate():
     """
     Checks if the process is running with Windows Administrator privileges.
     If not, re-launches itself via ShellExecute with 'runas' to prompt UAC elevation.
+    If elevated, ensures UAC silent auto-elevation policy is enabled for seamless remote control.
     """
     if sys.platform != 'win32':
         return
 
-    try:
-        is_admin = ctypes.windll.shell32.IsUserAnAdmin() != 0
-    except Exception:
-        is_admin = False
+    is_admin = is_process_elevated()
 
     if not is_admin:
         print("[!] [UAC] Elevated Administrator privileges required for remote desktop and UAC control.")
@@ -366,6 +426,282 @@ def check_and_elevate():
                 print(f"[-] [UAC] Elevation failed or declined with code {ret}.")
         except Exception as e:
             print(f"[-] [UAC] Error requesting elevation: {e}")
+    else:
+        # Automatically ensure UAC auto-elevation is active so remote users can install apps without input freeze
+        try:
+            res = set_windows_uac_auto_elevation(True)
+            if res.get("success"):
+                print("[+] [UAC] Windows Remote Auto-Elevation ACTIVE (ConsentPromptBehaviorAdmin=0, PromptOnSecureDesktop=0).")
+        except Exception:
+            pass
+
+# ==============================================================================
+# ULTRA-RESILIENT LOW-LEVEL INPUT INJECTION ENGINE (WIN32 + PYAUTOGUI FALLBACK)
+# ==============================================================================
+if sys.platform == "win32":
+    user32 = ctypes.windll.user32
+
+    MOUSEEVENTF_MOVE = 0x0001
+    MOUSEEVENTF_LEFTDOWN = 0x0002
+    MOUSEEVENTF_LEFTUP = 0x0004
+    MOUSEEVENTF_RIGHTDOWN = 0x0008
+    MOUSEEVENTF_RIGHTUP = 0x0010
+    MOUSEEVENTF_MIDDLEDOWN = 0x0020
+    MOUSEEVENTF_MIDDLEUP = 0x0040
+    MOUSEEVENTF_WHEEL = 0x0800
+
+    KEYEVENTF_EXTENDEDKEY = 0x0001
+    KEYEVENTF_KEYUP = 0x0002
+    KEYEVENTF_UNICODE = 0x0004
+
+    VK_MAP = {
+        "enter": 0x0D, "return": 0x0D,
+        "esc": 0x1B, "escape": 0x1B,
+        "backspace": 0x08, "tab": 0x09,
+        "space": 0x20,
+        "shift": 0x10, "ctrl": 0x11, "control": 0x11,
+        "alt": 0x12, "win": 0x5B, "super": 0x5B,
+        "left": 0x25, "up": 0x26, "right": 0x27, "down": 0x28,
+        "y": 0x59, "n": 0x4E, "delete": 0x2E, "del": 0x2E
+    }
+
+def win32_mouse_move_rel(dx: float, dy: float):
+    if sys.platform == "win32":
+        try:
+            user32.mouse_event(MOUSEEVENTF_MOVE, int(round(dx)), int(round(dy)), 0, 0)
+            return
+        except Exception:
+            pass
+    if pyautogui:
+        try:
+            pyautogui.moveRel(dx, dy)
+        except Exception:
+            pass
+
+def win32_mouse_move_abs(target_x: int, target_y: int):
+    if sys.platform == "win32":
+        try:
+            user32.SetCursorPos(int(target_x), int(target_y))
+            return
+        except Exception:
+            pass
+    if pyautogui:
+        try:
+            pyautogui.moveTo(target_x, target_y)
+        except Exception:
+            pass
+
+def win32_mouse_click(button: str = "left", is_double: bool = False, modifiers: list = None):
+    modifiers = modifiers or []
+    if pyautogui:
+        for m in modifiers:
+            try: pyautogui.keyDown(m.lower())
+            except Exception: pass
+
+    if sys.platform == "win32":
+        btn = button.lower()
+        down_flag = MOUSEEVENTF_LEFTDOWN if btn == "left" else (MOUSEEVENTF_RIGHTDOWN if btn == "right" else MOUSEEVENTF_MIDDLEDOWN)
+        up_flag = MOUSEEVENTF_LEFTUP if btn == "left" else (MOUSEEVENTF_RIGHTUP if btn == "right" else MOUSEEVENTF_MIDDLEUP)
+        clicks = 2 if is_double else 1
+        for i in range(clicks):
+            user32.mouse_event(down_flag, 0, 0, 0, 0)
+            time.sleep(0.015)
+            user32.mouse_event(up_flag, 0, 0, 0, 0)
+            if clicks > 1 and i == 0:
+                time.sleep(0.06)
+    elif pyautogui:
+        try:
+            pyautogui.click(button=button, clicks=2 if is_double else 1)
+        except Exception:
+            pass
+
+    if pyautogui:
+        for m in modifiers:
+            try: pyautogui.keyUp(m.lower())
+            except Exception: pass
+
+def win32_mouse_down(button: str = "left", modifiers: list = None):
+    modifiers = modifiers or []
+    if pyautogui:
+        for m in modifiers:
+            try: pyautogui.keyDown(m.lower())
+            except Exception: pass
+    if sys.platform == "win32":
+        btn = button.lower()
+        down_flag = MOUSEEVENTF_LEFTDOWN if btn == "left" else (MOUSEEVENTF_RIGHTDOWN if btn == "right" else MOUSEEVENTF_MIDDLEDOWN)
+        user32.mouse_event(down_flag, 0, 0, 0, 0)
+    elif pyautogui:
+        try:
+            pyautogui.mouseDown(button=button)
+        except Exception:
+            pass
+
+def win32_mouse_up(button: str = "left", modifiers: list = None):
+    modifiers = modifiers or []
+    if sys.platform == "win32":
+        btn = button.lower()
+        up_flag = MOUSEEVENTF_LEFTUP if btn == "left" else (MOUSEEVENTF_RIGHTUP if btn == "right" else MOUSEEVENTF_MIDDLEUP)
+        user32.mouse_event(up_flag, 0, 0, 0, 0)
+    elif pyautogui:
+        try:
+            pyautogui.mouseUp(button=button)
+        except Exception:
+            pass
+    if pyautogui:
+        for m in modifiers:
+            try: pyautogui.keyUp(m.lower())
+            except Exception: pass
+
+def win32_mouse_scroll(dy: int):
+    if sys.platform == "win32":
+        try:
+            wheel_delta = int(dy * 120)
+            user32.mouse_event(MOUSEEVENTF_WHEEL, 0, 0, wheel_delta, 0)
+            return
+        except Exception:
+            pass
+    if pyautogui:
+        try:
+            pyautogui.scroll(dy)
+        except Exception:
+            pass
+
+def win32_key_down(key: str):
+    if sys.platform == "win32" and key.lower() in VK_MAP:
+        try:
+            vk = VK_MAP[key.lower()]
+            user32.keybd_event(vk, 0, 0, 0)
+            return
+        except Exception:
+            pass
+    if pyautogui:
+        try: pyautogui.keyDown(key)
+        except Exception: pass
+
+def win32_key_up(key: str):
+    if sys.platform == "win32" and key.lower() in VK_MAP:
+        try:
+            vk = VK_MAP[key.lower()]
+            user32.keybd_event(vk, 0, KEYEVENTF_KEYUP, 0)
+            return
+        except Exception:
+            pass
+    if pyautogui:
+        try: pyautogui.keyUp(key)
+        except Exception: pass
+
+def win32_key_tap(key: str, modifiers: list = None):
+    modifiers = modifiers or []
+    if pyautogui:
+        try:
+            if modifiers:
+                keys = [m.lower() for m in modifiers] + [key.lower()]
+                pyautogui.hotkey(*keys)
+            else:
+                pyautogui.press(key)
+            return
+        except Exception:
+            pass
+
+    if sys.platform == "win32":
+        try:
+            for m in modifiers:
+                vk = VK_MAP.get(m.lower())
+                if vk: user32.keybd_event(vk, 0, 0, 0)
+            target_vk = VK_MAP.get(key.lower())
+            if target_vk:
+                user32.keybd_event(target_vk, 0, 0, 0)
+                time.sleep(0.01)
+                user32.keybd_event(target_vk, 0, KEYEVENTF_KEYUP, 0)
+            for m in reversed(modifiers):
+                vk = VK_MAP.get(m.lower())
+                if vk: user32.keybd_event(vk, 0, KEYEVENTF_KEYUP, 0)
+        except Exception:
+            pass
+
+def win32_key_combo(keys: list):
+    if pyautogui:
+        try:
+            pyautogui.hotkey(*[k.lower() for k in keys])
+            return
+        except Exception:
+            pass
+    if sys.platform == "win32":
+        try:
+            for k in keys:
+                vk = VK_MAP.get(k.lower())
+                if vk: user32.keybd_event(vk, 0, 0, 0)
+            time.sleep(0.02)
+            for k in reversed(keys):
+                vk = VK_MAP.get(k.lower())
+                if vk: user32.keybd_event(vk, 0, KEYEVENTF_KEYUP, 0)
+        except Exception:
+            pass
+
+def win32_type_text(text: str):
+    if pyautogui:
+        try:
+            pyautogui.write(text, interval=0.002)
+            return
+        except Exception:
+            pass
+    if sys.platform == "win32":
+        for char in text:
+            try:
+                user32.keybd_event(0, ord(char), KEYEVENTF_UNICODE, 0)
+                user32.keybd_event(0, ord(char), KEYEVENTF_UNICODE | KEYEVENTF_KEYUP, 0)
+            except Exception:
+                pass
+
+def win32_uac_accept():
+    """Approves UAC / Elevation dialog with multi-tier fallback (Win32 keybd_event + PyAutoGUI)."""
+    if sys.platform == "win32":
+        try:
+            # 1. Alt + Y
+            user32.keybd_event(VK_MAP["alt"], 0, 0, 0)
+            time.sleep(0.02)
+            user32.keybd_event(VK_MAP["y"], 0, 0, 0)
+            time.sleep(0.03)
+            user32.keybd_event(VK_MAP["y"], 0, KEYEVENTF_KEYUP, 0)
+            time.sleep(0.02)
+            user32.keybd_event(VK_MAP["alt"], 0, KEYEVENTF_KEYUP, 0)
+            time.sleep(0.05)
+            # 2. Left Arrow + Enter
+            user32.keybd_event(VK_MAP["left"], 0, 0, 0)
+            time.sleep(0.02)
+            user32.keybd_event(VK_MAP["left"], 0, KEYEVENTF_KEYUP, 0)
+            time.sleep(0.03)
+            user32.keybd_event(VK_MAP["enter"], 0, 0, 0)
+            time.sleep(0.02)
+            user32.keybd_event(VK_MAP["enter"], 0, KEYEVENTF_KEYUP, 0)
+            return
+        except Exception:
+            pass
+    if pyautogui:
+        try:
+            pyautogui.hotkey("alt", "y")
+            time.sleep(0.05)
+            pyautogui.press("left")
+            pyautogui.press("enter")
+        except Exception:
+            pass
+
+def win32_uac_deny():
+    """Denies / closes UAC dialog."""
+    if sys.platform == "win32":
+        try:
+            user32.keybd_event(VK_MAP["esc"], 0, 0, 0)
+            time.sleep(0.02)
+            user32.keybd_event(VK_MAP["esc"], 0, KEYEVENTF_KEYUP, 0)
+            return
+        except Exception:
+            pass
+    if pyautogui:
+        try:
+            pyautogui.press("escape")
+            pyautogui.hotkey("alt", "n")
+        except Exception:
+            pass
 
 # ==============================================================================
 # SECURE AUTHENTICATION STORE (SALTED PBKDF2 + JWT + WEBAUTHN)
@@ -667,6 +1003,24 @@ async def configure_powercfg_lid(request: Request):
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
     return {"success": False, "message": "Not running on Windows"}
+
+@app.get("/api/server/uac-policy")
+async def get_uac_policy(request: Request):
+    """Returns current Windows UAC and Secure Desktop policy settings."""
+    if not verify_local_or_auth(request):
+        raise HTTPException(status_code=403, detail="Forbidden: Restricted endpoint.")
+    return get_windows_uac_policy()
+
+@app.post("/api/server/uac-policy")
+async def set_uac_policy(request: Request, payload: Dict[str, Any] = Body(...)):
+    """Enables or disables silent auto-elevation for remote administrative access."""
+    if not verify_local_or_auth(request):
+        raise HTTPException(status_code=403, detail="Forbidden: Restricted endpoint.")
+    enable = bool(payload.get("auto_elevation", True))
+    res = set_windows_uac_auto_elevation(enable)
+    if not res.get("success"):
+        raise HTTPException(status_code=400, detail=res.get("message") or res.get("error", "Failed to update UAC policy"))
+    return res
 
 # ==============================================================================
 # REST API: AUTHENTICATION & WEBAUTHN
@@ -1384,105 +1738,91 @@ async def websocket_control(websocket: WebSocket, token: Optional[str] = Query(N
     try:
         while True:
             raw_msg = await websocket.receive_text()
-            cmd = json.loads(raw_msg)
-            action = cmd.get("type")
+            try:
+                cmd = json.loads(raw_msg)
+                action = cmd.get("type")
 
-            if not pyautogui:
-                continue
+                # Dynamically update screen size if needed
+                if pyautogui and (screen_w <= 0 or screen_h <= 0):
+                    screen_w, screen_h = pyautogui.size()
 
-            # Relative Mouse Movement (Trackpad Mode)
-            if action == "mouse_move_rel":
-                dx = float(cmd.get("dx", 0))
-                dy = float(cmd.get("dy", 0))
-                pyautogui.moveRel(dx, dy)
+                # Relative Mouse Movement (Trackpad Mode)
+                if action == "mouse_move_rel":
+                    dx = float(cmd.get("dx", 0))
+                    dy = float(cmd.get("dy", 0))
+                    win32_mouse_move_rel(dx, dy)
 
-            # Absolute Direct Touch Coordinate Mapping
-            elif action == "mouse_move_abs":
-                nx = float(cmd.get("x", 0)) # 0.0 to 1.0
-                ny = float(cmd.get("y", 0))
-                target_x = max(0, min(screen_w - 1, int(nx * screen_w)))
-                target_y = max(0, min(screen_h - 1, int(ny * screen_h)))
-                pyautogui.moveTo(target_x, target_y)
+                # Absolute Direct Touch Coordinate Mapping
+                elif action == "mouse_move_abs":
+                    nx = float(cmd.get("x", 0)) # 0.0 to 1.0
+                    ny = float(cmd.get("y", 0))
+                    target_x = max(0, min(screen_w - 1, int(nx * screen_w)))
+                    target_y = max(0, min(screen_h - 1, int(ny * screen_h)))
+                    win32_mouse_move_abs(target_x, target_y)
 
-            # Mouse Clicks with temporary modifiers (never locks Ctrl on laptop)
-            elif action == "mouse_click":
-                button = cmd.get("button", "left")
-                is_double = cmd.get("double", False)
-                modifiers = cmd.get("modifiers", [])
-                clicks = 2 if is_double else 1
+                # Mouse Clicks with temporary modifiers (never locks Ctrl on laptop)
+                elif action == "mouse_click":
+                    button = cmd.get("button", "left")
+                    is_double = cmd.get("double", False)
+                    modifiers = cmd.get("modifiers", [])
+                    win32_mouse_click(button=button, is_double=is_double, modifiers=modifiers)
 
-                for m in modifiers:
-                    pyautogui.keyDown(m.lower())
-                pyautogui.click(button=button, clicks=clicks)
-                for m in modifiers:
-                    pyautogui.keyUp(m.lower())
+                # Drag & Drop: Mouse Down / Mouse Up
+                elif action == "mouse_down":
+                    button = cmd.get("button", "left")
+                    modifiers = cmd.get("modifiers", [])
+                    win32_mouse_down(button=button, modifiers=modifiers)
 
-            # Drag & Drop: Mouse Down / Mouse Up
-            elif action == "mouse_down":
-                button = cmd.get("button", "left")
-                modifiers = cmd.get("modifiers", [])
-                for m in modifiers:
-                    pyautogui.keyDown(m.lower())
-                pyautogui.mouseDown(button=button)
+                elif action == "mouse_up":
+                    button = cmd.get("button", "left")
+                    modifiers = cmd.get("modifiers", [])
+                    win32_mouse_up(button=button, modifiers=modifiers)
 
-            elif action == "mouse_up":
-                button = cmd.get("button", "left")
-                modifiers = cmd.get("modifiers", [])
-                pyautogui.mouseUp(button=button)
-                for m in modifiers:
-                    pyautogui.keyUp(m.lower())
+                # Two-Finger Wheel Scrolling
+                elif action == "mouse_scroll":
+                    dy = int(cmd.get("dy", 0))
+                    win32_mouse_scroll(dy)
 
-            # Two-Finger Wheel Scrolling
-            elif action == "mouse_scroll":
-                dy = int(cmd.get("dy", 0))
-                pyautogui.scroll(dy)
+                # Keyboard Simulation
+                elif action == "key_down":
+                    key = cmd.get("key", "").lower()
+                    if key:
+                        win32_key_down(key)
 
-            # Keyboard Simulation
-            elif action == "key_down":
-                key = cmd.get("key", "").lower()
-                if key:
-                    pyautogui.keyDown(key)
+                elif action == "key_up":
+                    key = cmd.get("key", "").lower()
+                    if key:
+                        win32_key_up(key)
 
-            elif action == "key_up":
-                key = cmd.get("key", "").lower()
-                if key:
-                    pyautogui.keyUp(key)
+                elif action == "key_tap":
+                    key = cmd.get("key", "").lower()
+                    modifiers = cmd.get("modifiers", [])
+                    if key:
+                        win32_key_tap(key, modifiers)
 
-            elif action == "key_tap":
-                key = cmd.get("key", "").lower()
-                modifiers = cmd.get("modifiers", [])
-                if key:
-                    if modifiers:
-                        keys = [m.lower() for m in modifiers] + [key]
-                        pyautogui.hotkey(*keys)
-                    else:
-                        pyautogui.press(key)
+                # Key Combos (e.g. ['win', 'tab'] Task View, ['alt', 'tab'], ['ctrl', 'shift', 'esc'])
+                elif action == "key_combo":
+                    keys = cmd.get("keys", [])
+                    if keys:
+                        win32_key_combo(keys)
 
-            # Key Combos (e.g. ['win', 'tab'] Task View, ['alt', 'tab'], ['ctrl', 'shift', 'esc'])
-            elif action == "key_combo":
-                keys = cmd.get("keys", [])
-                if keys:
-                    pyautogui.hotkey(*[k.lower() for k in keys])
+                # Mobile Keyboard Text Forwarding
+                elif action == "type_text":
+                    text = cmd.get("text", "")
+                    if text:
+                        win32_type_text(text)
 
-            # Mobile Keyboard Text Forwarding
-            elif action == "type_text":
-                text = cmd.get("text", "")
-                if text:
-                    pyautogui.write(text, interval=0.002)
+                elif action == "key_backspace":
+                    win32_key_tap("backspace")
 
-            elif action == "key_backspace":
-                pyautogui.press("backspace")
+                # Dedicated UAC Consent Approval (Alt+Y) / Denial
+                elif action == "uac_accept":
+                    win32_uac_accept()
 
-            # Dedicated UAC Consent Approval (Alt+Y) / Denial
-            elif action == "uac_accept":
-                pyautogui.hotkey("alt", "y")
-                await asyncio.sleep(0.05)
-                pyautogui.press("left")
-                pyautogui.press("enter")
-
-            elif action == "uac_deny":
-                pyautogui.press("escape")
-                pyautogui.hotkey("alt", "n")
+                elif action == "uac_deny":
+                    win32_uac_deny()
+            except Exception as act_err:
+                print(f"[!] Warning: Input processing error for '{cmd.get('type') if isinstance(cmd, dict) else 'msg'}': {act_err}")
 
     except WebSocketDisconnect:
         pass

@@ -72,6 +72,7 @@ class RenisDesktopApp(tk.Tk):
         self.setup_styles()
         self.build_ui()
         self.check_cloudflared_status()
+        self.update_uac_ui()
 
         # Handle window close
         self.protocol("WM_DELETE_WINDOW", self.on_exit)
@@ -251,19 +252,23 @@ class RenisDesktopApp(tk.Tk):
         card_tools = tk.Frame(left_col, bg=COLOR_CARD, highlightbackground=COLOR_BORDER, highlightthickness=1)
         card_tools.pack(fill="x", pady=(0, 4), padx=2)
 
-        lbl_tools_title = tk.Label(card_tools, text="🛠️ SYSTEM CONTROLS", font=("Orbitron", 10, "bold"), fg=COLOR_CYAN, bg=COLOR_CARD)
+        lbl_tools_title = tk.Label(card_tools, text="🛠️ SYSTEM & REMOTE ELEVATION CONTROLS", font=("Orbitron", 10, "bold"), fg=COLOR_CYAN, bg=COLOR_CARD)
         lbl_tools_title.pack(anchor="w", padx=12, pady=(8, 4))
 
         tools_row = tk.Frame(card_tools, bg=COLOR_CARD)
         tools_row.pack(fill="x", padx=12, pady=(2, 8))
 
-        btn_power = tk.Button(tools_row, text="🌙 Keep Awake on Lid Close", bg="#151A24", fg=COLOR_TEXT, font=("Rajdhani", 9, "bold"),
-                              relief="flat", cursor="hand2", padx=10, pady=4, command=self.configure_lid_power)
-        btn_power.pack(side="left")
+        self.btn_uac_auto = tk.Button(tools_row, text="⚡ Checking Auto-Elevation...", bg="#151A24", fg=COLOR_TEXT, font=("Rajdhani", 9, "bold"),
+                                      relief="flat", cursor="hand2", padx=10, pady=4, command=self.toggle_uac_auto_elevation)
+        self.btn_uac_auto.pack(side="left")
 
-        btn_kill = tk.Button(tools_row, text="🛑 Disconnect All Devices", bg="#381115", fg=COLOR_CRIMSON, font=("Rajdhani", 9, "bold"),
+        btn_power = tk.Button(tools_row, text="🌙 Keep Awake", bg="#151A24", fg=COLOR_TEXT, font=("Rajdhani", 9, "bold"),
+                              relief="flat", cursor="hand2", padx=10, pady=4, command=self.configure_lid_power)
+        btn_power.pack(side="left", padx=6)
+
+        btn_kill = tk.Button(tools_row, text="🛑 Disconnect All", bg="#381115", fg=COLOR_CRIMSON, font=("Rajdhani", 9, "bold"),
                              relief="flat", cursor="hand2", padx=10, pady=4, command=self.kill_all_sessions)
-        btn_kill.pack(side="left", padx=8)
+        btn_kill.pack(side="left", padx=6)
 
         # RIGHT COLUMN: SCANNABLE QR CODE & QUICK ACCESS
         right_col = tk.Frame(main_body, bg=COLOR_CARD, width=380, highlightbackground=COLOR_BORDER, highlightthickness=1)
@@ -563,6 +568,61 @@ class RenisDesktopApp(tk.Tk):
             self.clipboard_clear()
             self.clipboard_append(self.current_qr_url)
             messagebox.showinfo("Copied", f"Copied to clipboard:\n{self.current_qr_url}")
+
+    def get_uac_status(self):
+        if sys.platform != 'win32':
+            return False, "Not Windows"
+        try:
+            import winreg
+            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System", 0, winreg.KEY_READ) as key:
+                consent_admin, _ = winreg.QueryValueEx(key, "ConsentPromptBehaviorAdmin")
+                prompt_secure, _ = winreg.QueryValueEx(key, "PromptOnSecureDesktop")
+                return (consent_admin == 0 and prompt_secure == 0), f"Consent:{consent_admin}, Secure:{prompt_secure}"
+        except Exception as e:
+            return False, str(e)
+
+    def update_uac_ui(self):
+        if not hasattr(self, 'btn_uac_auto'):
+            return
+        is_auto, _ = self.get_uac_status()
+        if is_auto:
+            self.btn_uac_auto.config(
+                text="⚡ Auto-Elevation: ACTIVE",
+                bg="#103318",
+                fg=COLOR_GREEN
+            )
+        else:
+            self.btn_uac_auto.config(
+                text="⚠️ Auto-Elevation: DISABLED",
+                bg="#382E11",
+                fg=COLOR_GOLD
+            )
+
+    def toggle_uac_auto_elevation(self):
+        if not self.is_elevated:
+            if messagebox.askyesno("Admin Required", "Modifying Windows UAC policy requires Administrator privileges.\n\nRelaunch RENI as Administrator now?"):
+                self.relaunch_as_admin()
+            return
+
+        is_auto, _ = self.get_uac_status()
+        new_val = not is_auto
+        try:
+            import winreg
+            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System", 0, winreg.KEY_SET_VALUE) as key:
+                if new_val:
+                    winreg.SetValueEx(key, "PromptOnSecureDesktop", 0, winreg.REG_DWORD, 0)
+                    winreg.SetValueEx(key, "ConsentPromptBehaviorAdmin", 0, winreg.REG_DWORD, 0)
+                    winreg.SetValueEx(key, "EnableUIADesktopToggle", 0, winreg.REG_DWORD, 1)
+                    self.log("UAC Policy: Silent Auto-Elevation ENABLED (Setups and installers can be remotely controlled).")
+                    messagebox.showinfo("UAC Auto-Elevation", "Silent Auto-Elevation is now ACTIVE.\n\nInstallers, setups, and administrative tasks will execute directly without blocking remote touch/mouse input.")
+                else:
+                    winreg.SetValueEx(key, "ConsentPromptBehaviorAdmin", 0, winreg.REG_DWORD, 5)
+                    self.log("UAC Policy: Default Prompt Restored.")
+                    messagebox.showinfo("UAC Auto-Elevation", "Standard Windows UAC Consent prompts restored.")
+            self.update_uac_ui()
+        except Exception as e:
+            self.log(f"Failed to toggle UAC policy: {e}")
+            messagebox.showerror("Error", f"Could not update registry:\n{e}")
 
     def configure_lid_power(self):
         if sys.platform == 'win32':

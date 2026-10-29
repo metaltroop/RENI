@@ -822,8 +822,12 @@
         return;
       }
       if (state.token && dom.authOverlay.classList.contains('hidden')) {
-        setTimeout(initControlWebSocket, 2000);
+        setTimeout(initControlWebSocket, 500);
       }
+    };
+
+    state.controlSocket.onerror = (err) => {
+      console.warn("Control WebSocket error:", err);
     };
   }
 

@@ -18,15 +18,19 @@ if %errorLevel% neq 0 (
 echo [+] Running with Elevated Administrator Privileges.
 cd /d "%~dp0"
 
-:: 2. Configure Windows Registry: Disable PromptOnSecureDesktop and Enable UIA Desktop Toggle
+:: 2. Configure Windows Registry: Disable PromptOnSecureDesktop, Enable UIA Desktop Toggle, and Auto-Elevate Setups
 echo.
-echo [*] [STEP 1/5] Configuring Windows UAC Secure Desktop Policy for Remote Viewing...
+echo [*] [STEP 1/5] Configuring Windows UAC Policy for Remote Viewing and Administration...
 reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" /v PromptOnSecureDesktop /t REG_DWORD /d 0 /f >nul 2>&1
 reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" /v EnableUIADesktopToggle /t REG_DWORD /d 1 /f >nul 2>&1
+reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" /v ConsentPromptBehaviorAdmin /t REG_DWORD /d 0 /f >nul 2>&1
 if %errorLevel% equ 0 (
-    echo [+] Successfully set PromptOnSecureDesktop = 0 and EnableUIADesktopToggle = 1 in Windows Registry.
+    echo [+] Successfully configured Windows UAC Policies:
+    echo     - PromptOnSecureDesktop = 0 (Displays elevation dialogs on desktop for remote viewing)
+    echo     - EnableUIADesktopToggle = 1 (Enables desktop assistive switching)
+    echo     - ConsentPromptBehaviorAdmin = 0 (Silent auto-elevation: setups/installers run without blocking remote touch/mouse)
 ) else (
-    echo [-] Warning: Failed to set PromptOnSecureDesktop registry value.
+    echo [-] Warning: Failed to set UAC registry values. Ensure script was run as Administrator.
 )
 
 :: 3. Configure PowerCFG: Prevent Sleep on Lid Close & Standby when Plugged In
