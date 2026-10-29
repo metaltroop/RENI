@@ -702,6 +702,9 @@
       dom.batteryIcon.textContent = bat.plugged ? '⚡' : '🔋';
       
       dom.toggleKeepawake.checked = !!data.keep_awake;
+      if (dom.toggleBlackout && document.activeElement !== dom.toggleBlackout) {
+        dom.toggleBlackout.checked = !!data.blackout;
+      }
     } catch (err) {}
   }
 

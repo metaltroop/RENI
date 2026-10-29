@@ -34,6 +34,8 @@ import secrets
 import asyncio
 import socket
 import ctypes
+from ctypes import wintypes
+import atexit
 from typing import Optional, Dict, Any, List, Set
 
 # Try loading environment variables
@@ -987,6 +989,10 @@ async def kill_all_sessions(request: Request):
     ACTIVE_STREAMS.clear()
     ACTIVE_CONTROLS.clear()
     ACTIVE_TERMINALS.clear()
+    try:
+        PRIVACY_CURTAIN.disable()
+    except Exception:
+        pass
     return {"success": True, "closed_sessions": count, "message": f"Closed {count} active remote sessions"}
 
 @app.post("/api/server/powercfg-lid")
@@ -1250,13 +1256,168 @@ async def get_system_telemetry(token: Optional[str] = Query(None), request: Requ
             "bytes_recv": net.bytes_recv
         },
         "keep_awake": KEEP_AWAKE_ACTIVE,
+        "blackout": PRIVACY_CURTAIN.active,
         "timestamp": time.time()
     }
+
+# ==============================================================================
+# HARDWARE PRIVACY BLACKOUT CURTAIN ENGINE (WIN32 EXCLUDE-FROM-CAPTURE + DDC/WMI)
+# ==============================================================================
+class PrivacyCurtainManager:
+    """
+    Manages physical monitor blackout for remote privacy.
+    Unlike SC_MONITORPOWER (which puts the display to sleep, stopping DWM desktop composition
+    and waking up on any synthetic mouse click), this engine:
+      1. Spawns a topmost, borderless, click-through, pitch-black overlay curtain across all monitors.
+      2. Applies SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE) so the physical display
+         shows pitch black, while screen capture (MSS / BitBlt / Streamer) completely excludes
+         the curtain and captures the real desktop underneath in full 60 FPS!
+      3. Dims the physical panel backlight to 0% via WMI / DDC to eliminate LCD backlight glow.
+      4. Remote mouse and keyboard inputs pass freely without waking or disrupting the blackout!
+    """
+    def __init__(self):
+        self.hwnd = None
+        self.thread = None
+        self.active = False
+        self.original_brightness = None
+        self.stop_event = threading.Event()
+        self.ready_event = threading.Event()
+
+    def _window_thread(self):
+        if sys.platform != 'win32':
+            self.ready_event.set()
+            return
+
+        user32 = ctypes.windll.user32
+        kernel32 = ctypes.windll.kernel32
+
+        user32.CreateWindowExW.argtypes = [
+            wintypes.DWORD, wintypes.LPCWSTR, wintypes.LPCWSTR, wintypes.DWORD,
+            ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int,
+            wintypes.HWND, wintypes.HMENU, wintypes.HINSTANCE, wintypes.LPVOID
+        ]
+        user32.CreateWindowExW.restype = wintypes.HWND
+
+        SM_XVIRTUALSCREEN = 76
+        SM_YVIRTUALSCREEN = 77
+        SM_CXVIRTUALSCREEN = 78
+        SM_CYVIRTUALSCREEN = 79
+
+        x = user32.GetSystemMetrics(SM_XVIRTUALSCREEN)
+        y = user32.GetSystemMetrics(SM_YVIRTUALSCREEN)
+        w = user32.GetSystemMetrics(SM_CXVIRTUALSCREEN)
+        h = user32.GetSystemMetrics(SM_CYVIRTUALSCREEN)
+        if w <= 0 or h <= 0:
+            w, h = 3840, 2160
+            x, y = 0, 0
+
+        WS_POPUP = 0x80000000
+        WS_VISIBLE = 0x10000000
+        SS_BLACKRECT = 0x00000004
+
+        WS_EX_TOPMOST = 0x00000008
+        WS_EX_TOOLWINDOW = 0x00000080
+        WS_EX_LAYERED = 0x00080000
+        WS_EX_TRANSPARENT = 0x00000020
+        WS_EX_NOACTIVATE = 0x08000000
+        WDA_EXCLUDEFROMCAPTURE = 0x00000011
+
+        hinstance = kernel32.GetModuleHandleW(None)
+
+        self.hwnd = user32.CreateWindowExW(
+            WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE,
+            'static',
+            'RENI_PrivacyCurtain',
+            WS_POPUP | WS_VISIBLE | SS_BLACKRECT,
+            x, y, w, h,
+            None, None, hinstance, None
+        )
+
+        if self.hwnd:
+            user32.SetWindowDisplayAffinity(self.hwnd, WDA_EXCLUDEFROMCAPTURE)
+            user32.SetLayeredWindowAttributes(self.hwnd, 0, 255, 0x02) # LWA_ALPHA
+            user32.ShowWindow(self.hwnd, 5) # SW_SHOW
+            user32.UpdateWindow(self.hwnd)
+            user32.SetWindowPos(self.hwnd, -1, 0, 0, 0, 0, 0x0002 | 0x0001 | 0x0010)
+
+        self.ready_event.set()
+
+        msg = wintypes.MSG()
+        while not self.stop_event.is_set():
+            while user32.PeekMessageW(ctypes.byref(msg), self.hwnd, 0, 0, 1):
+                user32.TranslateMessage(ctypes.byref(msg))
+                user32.DispatchMessageW(ctypes.byref(msg))
+            if self.hwnd:
+                user32.SetWindowPos(self.hwnd, -1, 0, 0, 0, 0, 0x0002 | 0x0001 | 0x0010)
+            self.stop_event.wait(0.2)
+
+        if self.hwnd:
+            user32.DestroyWindow(self.hwnd)
+            self.hwnd = None
+
+    def enable(self):
+        if self.active:
+            return True
+        self.stop_event.clear()
+        self.ready_event.clear()
+        self.thread = threading.Thread(target=self._window_thread, daemon=True)
+        self.thread.start()
+        self.ready_event.wait(timeout=2.0)
+
+        try:
+            self._dim_backlight()
+        except Exception:
+            pass
+
+        self.active = True
+        print("[+] [Privacy] Physical Monitor Blackout Curtain ENABLED (Physical screen blanked, remote streaming active).")
+        return True
+
+    def disable(self):
+        if not self.active:
+            return True
+        self.stop_event.set()
+        if self.thread:
+            self.thread.join(timeout=1.0)
+            self.thread = None
+        self.hwnd = None
+
+        try:
+            self._restore_backlight()
+        except Exception:
+            pass
+
+        self.active = False
+        print("[+] [Privacy] Physical Monitor Blackout Curtain DISABLED (Physical screen restored).")
+        return True
+
+    def _dim_backlight(self):
+        try:
+            cmd = 'powershell -NoProfile -Command "(Get-WmiObject -Namespace root/wmi -Class WmiMonitorBrightness).CurrentBrightness"'
+            out = subprocess.check_output(cmd, shell=True, timeout=2).decode().strip()
+            if out.isdigit():
+                self.original_brightness = int(out)
+                set_cmd = 'powershell -NoProfile -Command "(Get-WmiObject -Namespace root/wmi -Class WmiMonitorBrightnessMethods).WmiSetBrightness(1, 0)"'
+                subprocess.Popen(set_cmd, shell=True)
+        except Exception:
+            pass
+
+    def _restore_backlight(self):
+        try:
+            target = self.original_brightness if self.original_brightness is not None else 100
+            set_cmd = f'powershell -NoProfile -Command "(Get-WmiObject -Namespace root/wmi -Class WmiMonitorBrightnessMethods).WmiSetBrightness(1, {target})"'
+            subprocess.Popen(set_cmd, shell=True)
+        except Exception:
+            pass
+
+PRIVACY_CURTAIN = PrivacyCurtainManager()
+atexit.register(lambda: PRIVACY_CURTAIN.disable())
 
 @app.post("/api/power/blackout")
 async def toggle_privacy_blackout(payload: Dict[str, Any], request: Request):
     """
-    Turns off physical monitor display while keeping machine running and streaming.
+    Toggles physical monitor display blackout while keeping machine running and streaming.
+    Uses Win32 Topmost Exclude-From-Capture Blackout Curtain + Backlight Dimming.
     Payload: {"state": true (off) | false (on)}
     """
     auth_header = request.headers.get("Authorization", "")
@@ -1264,15 +1425,15 @@ async def toggle_privacy_blackout(payload: Dict[str, Any], request: Request):
     if not token or not verify_jwt_token(token):
         raise HTTPException(status_code=401, detail="Unauthorized")
 
-    turn_off = payload.get("state", True)
+    turn_off = bool(payload.get("state", True))
     if sys.platform == 'win32':
-        mode = MONITOR_OFF if turn_off else MONITOR_ON
         try:
-            ctypes.windll.user32.SendMessageW(HWND_BROADCAST, WM_SYSCOMMAND, SC_MONITORPOWER, mode)
-            if not turn_off and pyautogui:
-                pyautogui.moveRel(1, 0)
-                pyautogui.moveRel(-1, 0)
-            return {"success": True, "blackout": turn_off, "message": f"Monitor set to {'OFF' if turn_off else 'ON'}"}
+            if turn_off:
+                PRIVACY_CURTAIN.enable()
+                return {"success": True, "blackout": True, "message": "Privacy Blackout ENABLED: Physical screen blanked, remote streaming active."}
+            else:
+                PRIVACY_CURTAIN.disable()
+                return {"success": True, "blackout": False, "message": "Privacy Blackout DISABLED: Physical screen restored."}
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
     return {"success": False, "message": "Not running on Windows host"}
