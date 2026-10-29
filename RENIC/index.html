@@ -197,6 +197,10 @@
         <button id="btn-uac-yes" class="dock-btn dock-btn-warning" title="1-Tap Approve Windows Administrator Prompt (Alt+Y)">
           <span>🛡️ UAC YES</span>
         </button>
+        <!-- Windows Lock Screen Unlock Gateway -->
+        <button id="btn-unlock-modal-trigger" class="dock-btn dock-btn-accent" title="Unlock Windows PC Lock Screen">
+          <span>🔓 UNLOCK</span>
+        </button>
         <button class="dock-btn" data-key="win" title="Windows Start Menu">WIN</button>
         <button class="dock-btn" data-combo="alt,tab" title="Switch Tasks">ALT+TAB</button>
         <!-- Task View (Win + Tab) Macro -->
@@ -537,6 +541,39 @@
               <p>No screenshot detected on clipboard.<br>Tap <strong>"Grab PC Screenshot"</strong> or <strong>"Pick Phone Image"</strong>.</p>
             </div>
           </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- UNLOCK WINDOWS PC MODAL -->
+    <div id="unlock-modal" class="modal-overlay hidden">
+      <div class="modal-card">
+        <div class="modal-header">
+          <div class="modal-title-group">
+            <h3>🔓 UNLOCK WINDOWS PC</h3>
+            <span class="modal-version-tag">Lock Screen Gateway</span>
+          </div>
+          <button id="btn-close-unlock" class="btn-close">✕</button>
+        </div>
+        <div class="modal-body">
+          <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 12px; line-height: 1.4;">
+            When Windows is locked, use this gateway to dismiss the lock screen and securely inject your Windows PIN or Password.
+          </p>
+          <div style="display: flex; gap: 8px; margin-bottom: 12px;">
+            <input type="password" id="input-win-password" placeholder="Enter Windows PIN / Password..." style="flex: 1; padding: 10px 12px; background: #0B0C10; border: 1px solid var(--border-subtle); border-radius: 6px; color: #FFF; font-family: var(--font-mono); font-size: 14px;">
+            <button id="btn-toggle-win-pw-vis" class="reni-btn btn-secondary" style="padding: 0 12px; cursor: pointer;" title="Show/Hide PIN">👁️</button>
+          </div>
+          <div style="display: flex; gap: 8px; margin-bottom: 12px;">
+            <button id="btn-do-wake-lock" class="reni-btn btn-secondary" style="flex: 1; font-size: 12px; padding: 8px 4px;">
+              ⚡ Dismiss Clock
+            </button>
+            <button id="btn-do-sas" class="reni-btn btn-secondary" style="flex: 1; font-size: 12px; padding: 8px 4px;">
+              🔑 Ctrl+Alt+Del
+            </button>
+          </div>
+          <button id="btn-do-unlock-submit" class="reni-btn btn-primary" style="width: 100%; font-size: 14px; padding: 12px 14px; font-weight: bold;">
+            🚀 Submit Password & Unlock
+          </button>
         </div>
       </div>
     </div>

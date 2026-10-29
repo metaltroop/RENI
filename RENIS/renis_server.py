@@ -394,7 +394,8 @@ def set_windows_uac_auto_elevation(enable: bool = True) -> Dict[str, Any]:
                 winreg.SetValueEx(key, "PromptOnSecureDesktop", 0, winreg.REG_DWORD, 0)
                 winreg.SetValueEx(key, "ConsentPromptBehaviorAdmin", 0, winreg.REG_DWORD, 0)
                 winreg.SetValueEx(key, "EnableUIADesktopToggle", 0, winreg.REG_DWORD, 1)
-                msg = "UAC Silent Auto-Elevation ENABLED: Setups and installers can be remotely controlled without modal input blocks."
+                winreg.SetValueEx(key, "SoftwareSASGeneration", 0, winreg.REG_DWORD, 3)
+                msg = "UAC Silent Auto-Elevation & Remote SAS ENABLED: Setups, UAC, and Lock Screen are unlocked."
             else:
                 winreg.SetValueEx(key, "ConsentPromptBehaviorAdmin", 0, winreg.REG_DWORD, 5)
                 msg = "UAC Silent Auto-Elevation DISABLED: Windows will prompt for consent on administrative actions."
@@ -467,6 +468,84 @@ if sys.platform == "win32":
         "left": 0x25, "up": 0x26, "right": 0x27, "down": 0x28,
         "y": 0x59, "n": 0x4E, "delete": 0x2E, "del": 0x2E
     }
+
+def attach_to_input_desktop() -> bool:
+    """Attaches the current calling thread to the currently active input desktop (e.g. Winlogon or Default)."""
+    if sys.platform != 'win32':
+        return False
+    try:
+        user32 = ctypes.windll.user32
+        user32.OpenInputDesktop.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        user32.OpenInputDesktop.restype = wintypes.HANDLE
+        user32.SetThreadDesktop.argtypes = [wintypes.HANDLE]
+        user32.SetThreadDesktop.restype = wintypes.BOOL
+
+        hdesk = user32.OpenInputDesktop(0, False, 0x01FF) # MAXIMUM_ALLOWED / DESKTOP_ALL_ACCESS
+        if hdesk:
+            res = user32.SetThreadDesktop(hdesk)
+            user32.CloseDesktop(hdesk)
+            return bool(res)
+    except Exception:
+        pass
+    return False
+
+def remote_unlock_workstation(password: str = "", send_sas: bool = False, wake_only: bool = False) -> Dict[str, Any]:
+    """
+    Wakes Windows Lock Screen, attaches thread to input desktop, and enters Windows credentials.
+    """
+    if sys.platform != 'win32':
+        return {"success": False, "message": "Not Windows host"}
+
+    user32 = ctypes.windll.user32
+
+    # 1. Attach to active input desktop
+    attach_to_input_desktop()
+
+    # 2. If SAS (Ctrl+Alt+Del) requested
+    if send_sas:
+        try:
+            sas = ctypes.windll.LoadLibrary('sas.dll')
+            sas.SendSAS.argtypes = [ctypes.c_int]
+            sas.SendSAS.restype = None
+            sas.SendSAS(0)
+            time.sleep(0.35)
+        except Exception:
+            win32_key_combo(["ctrl", "alt", "delete"])
+            time.sleep(0.35)
+
+    # 3. Dismiss lock screen clock wallpaper: send Space key tap
+    attach_to_input_desktop()
+    user32.keybd_event(0x20, 0, 0, 0) # Space down
+    time.sleep(0.02)
+    user32.keybd_event(0x20, 0, 0x0002, 0) # Space up
+    time.sleep(0.35)
+
+    if wake_only or not password:
+        return {"success": True, "message": "Lock screen dismissed, PIN/Password box focused."}
+
+    # 4. Attach again in case desktop transitioned
+    attach_to_input_desktop()
+    time.sleep(0.1)
+
+    # 5. Type password / PIN characters with safe micro-interval
+    KEYEVENTF_UNICODE = 0x0004
+    KEYEVENTF_KEYUP = 0x0002
+    for ch in password:
+        user32.keybd_event(0, ord(ch), KEYEVENTF_UNICODE, 0)
+        time.sleep(0.015)
+        user32.keybd_event(0, ord(ch), KEYEVENTF_UNICODE | KEYEVENTF_KEYUP, 0)
+        time.sleep(0.015)
+
+    # 6. Submit via Enter key
+    time.sleep(0.08)
+    user32.keybd_event(0x0D, 0, 0, 0) # Enter down
+    time.sleep(0.03)
+    user32.keybd_event(0x0D, 0, KEYEVENTF_KEYUP, 0) # Enter up
+
+    time.sleep(0.5)
+    attach_to_input_desktop()
+
+    return {"success": True, "message": "Unlock credentials injected. Logging into Windows."}
 
 def win32_mouse_move_rel(dx: float, dy: float):
     if sys.platform == "win32":
@@ -1580,6 +1659,26 @@ async def system_power_action(payload: Dict[str, str], request: Request):
 
     raise HTTPException(status_code=400, detail=f"Unsupported action: {action}")
 
+@app.post("/api/power/unlock")
+async def unlock_workstation(payload: Dict[str, Any], request: Request):
+    """
+    Dismisses Windows Lock Screen, focuses password box, and injects PIN / Password.
+    Payload: {"password": "...", "send_sas": false, "wake_only": false}
+    """
+    auth_header = request.headers.get("Authorization", "")
+    token = auth_header.replace("Bearer ", "") if "Bearer " in auth_header else ""
+    if not token or not verify_jwt_token(token):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    password = payload.get("password", "")
+    send_sas = bool(payload.get("send_sas", False))
+    wake_only = bool(payload.get("wake_only", False))
+
+    res = remote_unlock_workstation(password=password, send_sas=send_sas, wake_only=wake_only)
+    if not res.get("success"):
+        raise HTTPException(status_code=500, detail=res.get("message", "Unlock failed"))
+    return res
+
 def host_get_clipboard() -> str:
     """Reads text from Windows host clipboard with retry."""
     for _ in range(3):
@@ -1860,6 +1959,7 @@ async def websocket_stream(websocket: WebSocket, token: Optional[str] = Query(No
                 except Exception:
                     # GDI context can momentarily disconnect during UAC transitions or screen lock
                     try:
+                        attach_to_input_desktop()
                         sct.close()
                         sct = mss.mss()
                         sct_img = sct.grab(monitor)
@@ -2061,17 +2161,28 @@ async def websocket_control(websocket: WebSocket, token: Optional[str] = Query(N
                 elif action == "type_text":
                     text = cmd.get("text", "")
                     if text:
+                        attach_to_input_desktop()
                         win32_type_text(text)
 
                 elif action == "key_backspace":
+                    attach_to_input_desktop()
                     win32_key_tap("backspace")
 
                 # Dedicated UAC Consent Approval (Alt+Y) / Denial
                 elif action == "uac_accept":
+                    attach_to_input_desktop()
                     win32_uac_accept()
 
                 elif action == "uac_deny":
+                    attach_to_input_desktop()
                     win32_uac_deny()
+
+                # Remote Windows Lock Screen Unlock
+                elif action == "unlock":
+                    password = cmd.get("password", "")
+                    send_sas = bool(cmd.get("send_sas", False))
+                    wake_only = bool(cmd.get("wake_only", False))
+                    remote_unlock_workstation(password=password, send_sas=send_sas, wake_only=wake_only)
             except Exception as act_err:
                 print(f"[!] Warning: Input processing error for '{cmd.get('type') if isinstance(cmd, dict) else 'msg'}': {act_err}")
 

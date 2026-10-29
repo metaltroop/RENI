@@ -135,6 +135,14 @@
     mobileKeyCapture: document.getElementById('mobile-key-capture'),
     btnKeyboardTrigger: document.getElementById('btn-keyboard-trigger'),
     btnClipboardOpen: document.getElementById('btn-clipboard-open'),
+    btnUnlockModalTrigger: document.getElementById('btn-unlock-modal-trigger'),
+    unlockModal: document.getElementById('unlock-modal'),
+    btnCloseUnlock: document.getElementById('btn-close-unlock'),
+    inputWinPassword: document.getElementById('input-win-password'),
+    btnToggleWinPwVis: document.getElementById('btn-toggle-win-pw-vis'),
+    btnDoWakeLock: document.getElementById('btn-do-wake-lock'),
+    btnDoSas: document.getElementById('btn-do-sas'),
+    btnDoUnlockSubmit: document.getElementById('btn-do-unlock-submit'),
 
     // Onboarding Banners & Modals
     pwaBanner: document.getElementById('pwa-install-banner'),
@@ -2222,6 +2230,94 @@
       showToast("Error updating PIN");
     }
   });
+
+  // Windows Lock Screen Unlock Gateway Handlers
+  if (dom.btnUnlockModalTrigger) {
+    dom.btnUnlockModalTrigger.addEventListener('click', () => {
+      if (dom.unlockModal) {
+        dom.unlockModal.classList.remove('hidden');
+        if (dom.inputWinPassword) {
+          dom.inputWinPassword.focus();
+        }
+      }
+    });
+  }
+
+  if (dom.btnCloseUnlock) {
+    dom.btnCloseUnlock.addEventListener('click', () => {
+      if (dom.unlockModal) {
+        dom.unlockModal.classList.add('hidden');
+      }
+    });
+  }
+
+  if (dom.btnToggleWinPwVis && dom.inputWinPassword) {
+    dom.btnToggleWinPwVis.addEventListener('click', () => {
+      if (dom.inputWinPassword.type === 'password') {
+        dom.inputWinPassword.type = 'text';
+        dom.btnToggleWinPwVis.textContent = '🔒';
+      } else {
+        dom.inputWinPassword.type = 'password';
+        dom.btnToggleWinPwVis.textContent = '👁️';
+      }
+    });
+  }
+
+  async function sendUnlockRequest(payload) {
+    try {
+      showToast("Sending unlock command...");
+      const res = await fetch('/api/power/unlock', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${state.token}`
+        },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      if (res.ok) {
+        showToast(data.message || "Lock screen command sent");
+      } else {
+        showToast(data.detail || "Unlock error");
+      }
+    } catch (e) {
+      showToast("Failed to connect to unlock API");
+    }
+  }
+
+  if (dom.btnDoWakeLock) {
+    dom.btnDoWakeLock.addEventListener('click', () => {
+      sendUnlockRequest({ wake_only: true });
+    });
+  }
+
+  if (dom.btnDoSas) {
+    dom.btnDoSas.addEventListener('click', () => {
+      sendUnlockRequest({ send_sas: true, wake_only: true });
+    });
+  }
+
+  if (dom.btnDoUnlockSubmit) {
+    const handleUnlockSubmit = () => {
+      const pw = dom.inputWinPassword ? dom.inputWinPassword.value : '';
+      if (!pw) {
+        showToast("Enter your Windows password or PIN");
+        return;
+      }
+      sendUnlockRequest({ password: pw });
+      if (dom.inputWinPassword) dom.inputWinPassword.value = '';
+      if (dom.unlockModal) dom.unlockModal.classList.add('hidden');
+    };
+
+    dom.btnDoUnlockSubmit.addEventListener('click', handleUnlockSubmit);
+    if (dom.inputWinPassword) {
+      dom.inputWinPassword.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          handleUnlockSubmit();
+        }
+      });
+    }
+  }
 
   // Logout
   dom.btnLogout.addEventListener('click', () => {
