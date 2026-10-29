@@ -1248,8 +1248,28 @@ async def websocket_stream(websocket: WebSocket, token: Optional[str] = Query(No
             while config["running"]:
                 start_time = time.perf_counter()
                 
-                # Screen capture
-                sct_img = sct.grab(monitor)
+                # Screen capture with UAC/Desktop switch resilience
+                sct_img = None
+                try:
+                    sct_img = sct.grab(monitor)
+                except Exception:
+                    # GDI context can momentarily disconnect during UAC transitions or screen lock
+                    try:
+                        sct.close()
+                        sct = mss.mss()
+                        sct_img = sct.grab(monitor)
+                    except Exception:
+                        # Fallback to PIL ImageGrab if GDI context needs a moment
+                        try:
+                            from PIL import ImageGrab
+                            pil_fb = ImageGrab.grab(all_screens=True)
+                            buf = io.BytesIO()
+                            pil_fb.save(buf, format="JPEG", quality=config.get("quality", 50))
+                            await websocket.send_bytes(buf.getvalue())
+                        except Exception:
+                            pass
+                        await asyncio.sleep(0.04)
+                        continue
 
                 # Cursor tracking
                 cur_x, cur_y = (0, 0)
@@ -1452,6 +1472,17 @@ async def websocket_control(websocket: WebSocket, token: Optional[str] = Query(N
 
             elif action == "key_backspace":
                 pyautogui.press("backspace")
+
+            # Dedicated UAC Consent Approval (Alt+Y) / Denial
+            elif action == "uac_accept":
+                pyautogui.hotkey("alt", "y")
+                await asyncio.sleep(0.05)
+                pyautogui.press("left")
+                pyautogui.press("enter")
+
+            elif action == "uac_deny":
+                pyautogui.press("escape")
+                pyautogui.hotkey("alt", "n")
 
     except WebSocketDisconnect:
         pass

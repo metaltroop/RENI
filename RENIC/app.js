@@ -1155,6 +1155,14 @@
     });
   });
 
+  const btnUacYes = document.getElementById('btn-uac-yes');
+  if (btnUacYes) {
+    btnUacYes.addEventListener('click', () => {
+      sendControl({ type: "uac_accept" });
+      showToast("🛡️ Approved Administrator Permission (Alt+Y)");
+    });
+  }
+
   // ==============================================================================
   // WEBSOCKET 3: ELEVATED POWERSHELL TERMINAL DRAWER
   // ==============================================================================

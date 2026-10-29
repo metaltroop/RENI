@@ -10,17 +10,38 @@ echo ===========================================================================
 echo   R.E.N.I.S. // HOST CONTROL CENTER AND UNIVERSAL TUNNEL MANAGER (v3.0)
 echo ==============================================================================
 
-:: Check elevation status (informational; standard user works out of the box)
-net session >nul 2>&1
-if %errorLevel% equ 0 (
-    echo [+] Running with Administrator privileges.
-) else (
-    echo [*] Running in Standard User mode.
+:: Parse command line flags
+set "IS_CLI="
+set "NO_ELEVATE="
+for %%A in (%*) do (
+    if "%%~A"=="--cli" set "IS_CLI=1"
+    if "%%~A"=="--no-elevate" set "NO_ELEVATE=1"
 )
 
-:: Check for CLI flag
+:: Check for Administrative Privileges and Auto-Elevate
+net session >nul 2>&1
+if %errorLevel% neq 0 (
+    if defined NO_ELEVATE (
+        echo [*] Running in Standard User mode.
+        echo [!] Note: UAC prompts cannot be viewed or controlled without Administrator rights.
+    ) else (
+        echo [*] Administrator privileges required to view and control UAC prompts.
+        echo [*] Requesting elevation...
+        set "PASS_ARGS=%*"
+        if defined PASS_ARGS (
+            powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Process -FilePath '%~f0' -WorkingDirectory '%~dp0' -ArgumentList '%PASS_ARGS%' -Verb RunAs"
+        ) else (
+            powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Process -FilePath '%~f0' -WorkingDirectory '%~dp0' -Verb RunAs"
+        )
+        exit /b
+    )
+) else (
+    echo [+] Running with Elevated Administrator Privileges [UAC Access Enabled].
+)
+
+:: Choose target script based on mode
 set "TARGET_SCRIPT=RENIS\renis_gui.py"
-if "%~1"=="--cli" (
+if defined IS_CLI (
     echo [*] CLI mode requested. Launching terminal server...
     set "TARGET_SCRIPT=RENIS\renis_server.py"
 ) else (

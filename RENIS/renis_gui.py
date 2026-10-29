@@ -67,6 +67,7 @@ class RenisDesktopApp(tk.Tk):
 
         self.discovered_ips = self.get_lan_ips()
         self.default_port = 8765
+        self.is_elevated = self.check_elevation()
 
         self.setup_styles()
         self.build_ui()
@@ -74,6 +75,24 @@ class RenisDesktopApp(tk.Tk):
 
         # Handle window close
         self.protocol("WM_DELETE_WINDOW", self.on_exit)
+
+    def check_elevation(self):
+        if sys.platform == 'win32':
+            try:
+                import ctypes
+                return ctypes.windll.shell32.IsUserAnAdmin() != 0
+            except Exception:
+                return False
+        return False
+
+    def relaunch_as_admin(self):
+        if sys.platform == 'win32':
+            import ctypes
+            self.stop_server()
+            self.stop_tunnel()
+            batch_path = str(SERVER_DIR.parent / "start_reni.bat")
+            ctypes.windll.shell32.ShellExecuteW(None, "runas", batch_path, "", str(SERVER_DIR.parent), 1)
+            self.destroy()
 
     def get_lan_ips(self):
         ips = []
@@ -117,6 +136,16 @@ class RenisDesktopApp(tk.Tk):
 
         lbl_sub = tk.Label(title_frame, text=" // CONTROL CENTER v3.0", font=("Rajdhani", 11, "bold"), fg=COLOR_MUTED, bg=COLOR_CARD)
         lbl_sub.pack(side="left", padx=(4, 0))
+
+        if self.is_elevated:
+            lbl_admin = tk.Label(header, text="🛡️ ELEVATED (UAC OK)", font=("JetBrains Mono", 8, "bold"), fg=COLOR_GREEN, bg="#0E2314", padx=6, pady=2)
+            lbl_admin.pack(side="left", padx=10)
+        else:
+            lbl_admin = tk.Label(header, text="⚠️ STANDARD (NO UAC)", font=("JetBrains Mono", 8, "bold"), fg=COLOR_CRIMSON, bg="#2E0E12", padx=6, pady=2)
+            lbl_admin.pack(side="left", padx=10)
+            btn_relaunch = tk.Button(header, text="🛡️ Relaunch as Admin", bg=COLOR_CRIMSON, fg="#FFFFFF", font=("Rajdhani", 8, "bold"),
+                                     relief="flat", cursor="hand2", padx=8, pady=2, command=self.relaunch_as_admin)
+            btn_relaunch.pack(side="left", padx=2)
 
         btn_dash = tk.Button(header, text="🌐 Open Host Dashboard", bg="#1C2130", fg=COLOR_CYAN, font=("Rajdhani", 10, "bold"),
                              relief="flat", cursor="hand2", padx=12, pady=4, activebackground=COLOR_CYAN, activeforeground=COLOR_BG,
@@ -332,6 +361,8 @@ class RenisDesktopApp(tk.Tk):
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 bufsize=1,
                 creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
             )
@@ -442,6 +473,8 @@ class RenisDesktopApp(tk.Tk):
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 bufsize=1,
                 creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
             )

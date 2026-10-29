@@ -1,7 +1,7 @@
 @echo off
 setlocal EnableDelayedExpansion
 
-title RENI // SYSTEM, POWER & UAC CONFIGURATION
+title RENI // SYSTEM, POWER AND UAC CONFIGURATION
 echo ==============================================================================
 echo   R.E.N.I.S. // REMOTE ACCESS SERVER - ADMINISTRATOR SETUP
 echo   Windows UAC Secure Desktop, PowerCFG Lid-Close, Firewall, Venv, and AutoStart
@@ -18,12 +18,13 @@ if %errorLevel% neq 0 (
 echo [+] Running with Elevated Administrator Privileges.
 cd /d "%~dp0"
 
-:: 2. Configure Windows Registry: Disable PromptOnSecureDesktop
+:: 2. Configure Windows Registry: Disable PromptOnSecureDesktop and Enable UIA Desktop Toggle
 echo.
-echo [*] [STEP 1/5] Configuring Windows UAC Secure Desktop Policy...
+echo [*] [STEP 1/5] Configuring Windows UAC Secure Desktop Policy for Remote Viewing...
 reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" /v PromptOnSecureDesktop /t REG_DWORD /d 0 /f >nul 2>&1
+reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" /v EnableUIADesktopToggle /t REG_DWORD /d 1 /f >nul 2>&1
 if %errorLevel% equ 0 (
-    echo [+] Successfully set PromptOnSecureDesktop = 0 in Windows Registry.
+    echo [+] Successfully set PromptOnSecureDesktop = 0 and EnableUIADesktopToggle = 1 in Windows Registry.
 ) else (
     echo [-] Warning: Failed to set PromptOnSecureDesktop registry value.
 )
@@ -89,9 +90,9 @@ if %errorLevel% equ 0 (
 
 echo.
 echo ==============================================================================
-echo   >> RENIS SETUP COMPLETE!
-echo   >> Laptop is configured for 24/7 remote access (lid closed on AC).
-echo   >> Start server anytime with: start_reni.bat
+echo   [*] RENIS SETUP COMPLETE!
+echo   [*] Laptop is configured for 24/7 remote access (lid closed on AC).
+echo   [*] Start server anytime with: start_reni.bat
 echo ==============================================================================
 echo.
 pause
