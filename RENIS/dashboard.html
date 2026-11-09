@@ -495,6 +495,9 @@
           <button class="btn btn-secondary" id="btn-powercfg-lid">
             <span>🌙 Enable 24/7 Always-On (Lid-Closed Do Nothing)</span>
           </button>
+          <button class="btn btn-secondary" id="btn-reset-security" style="border-color: var(--neon-gold); color: var(--neon-gold);" title="Restore Windows factory security defaults">
+            <span>🛡️ Restore Windows Factory Defaults</span>
+          </button>
           <button class="btn btn-danger" id="btn-kill-sessions">
             <span>🛑 Disconnect All Remote Devices</span>
           </button>
@@ -522,6 +525,7 @@
       btnToggleBlackout: document.getElementById('btn-toggle-blackout'),
       lblBlackoutBtn: document.getElementById('lbl-blackout-btn'),
       btnPowercfgLid: document.getElementById('btn-powercfg-lid'),
+      btnResetSecurity: document.getElementById('btn-reset-security'),
       btnKillSessions: document.getElementById('btn-kill-sessions'),
       toast: document.getElementById('toast'),
       // Tunnel elements
@@ -858,6 +862,21 @@
         showToast('Error updating PowerCFG');
       }
     });
+
+    if (dom.btnResetSecurity) {
+      dom.btnResetSecurity.addEventListener('click', async () => {
+        if (confirm("Restore Windows Factory Security Defaults?\n\nThis will re-enable the Secure Desktop, restore default UAC elevation prompts (PromptOnSecureDesktop=1, Consent=2), restore lid-close sleep behavior, and delete RENI firewall rules.")) {
+          try {
+            const res = await fetch('/api/server/reset-security', { method: 'POST' });
+            const data = await res.json();
+            showToast(data.message || 'Factory defaults restored');
+            checkUacPolicy();
+          } catch (e) {
+            showToast('Failed to reset security defaults');
+          }
+        }
+      });
+    }
 
     dom.btnKillSessions.addEventListener('click', async () => {
       if (confirm('Disconnect all remote mobile stream and control sessions immediately?')) {

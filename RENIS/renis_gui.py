@@ -270,6 +270,10 @@ class RenisDesktopApp(tk.Tk):
                                       relief="flat", cursor="hand2", padx=10, pady=4, command=self.toggle_privacy_blackout)
         self.btn_blackout.pack(side="left", padx=6)
 
+        btn_reset = tk.Button(tools_row, text="🛡️ Reset Windows Defaults", bg="#2A1B10", fg=COLOR_GOLD, font=("Rajdhani", 9, "bold"),
+                              relief="flat", cursor="hand2", padx=10, pady=4, command=self.reset_system_defaults)
+        btn_reset.pack(side="left", padx=6)
+
         btn_kill = tk.Button(tools_row, text="🛑 Disconnect All", bg="#381115", fg=COLOR_CRIMSON, font=("Rajdhani", 9, "bold"),
                              relief="flat", cursor="hand2", padx=10, pady=4, command=self.kill_all_sessions)
         btn_kill.pack(side="left", padx=6)
@@ -637,31 +641,57 @@ class RenisDesktopApp(tk.Tk):
 
     def get_uac_status(self):
         if sys.platform != 'win32':
-            return False, "Not Windows"
+            return {"supported": False, "mode": "unsupported"}
         try:
             import winreg
             with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System", 0, winreg.KEY_READ) as key:
                 consent_admin, _ = winreg.QueryValueEx(key, "ConsentPromptBehaviorAdmin")
                 prompt_secure, _ = winreg.QueryValueEx(key, "PromptOnSecureDesktop")
-                return (consent_admin == 0 and prompt_secure == 0), f"Consent:{consent_admin}, Secure:{prompt_secure}"
+                is_factory = (consent_admin == 2 and prompt_secure == 1)
+                is_silent = (consent_admin == 0)
+                is_prompt = (consent_admin == 5 and prompt_secure == 0)
+                return {
+                    "supported": True,
+                    "consent": consent_admin,
+                    "secure": prompt_secure,
+                    "is_factory": is_factory,
+                    "is_silent": is_silent,
+                    "is_prompt": is_prompt
+                }
         except Exception as e:
-            return False, str(e)
+            return {"supported": False, "error": str(e)}
 
     def update_uac_ui(self):
         if not hasattr(self, 'btn_uac_auto'):
             return
-        is_auto, _ = self.get_uac_status()
-        if is_auto:
+        status = self.get_uac_status()
+        if not status.get("supported"):
+            self.btn_uac_auto.config(text="UAC: Unsupported", bg="#151A24", fg=COLOR_MUTED)
+            return
+
+        if status.get("is_factory"):
             self.btn_uac_auto.config(
-                text="⚡ Auto-Elevation: ACTIVE",
+                text="🛡️ Factory Security (Default)",
+                bg="#102533",
+                fg=COLOR_CYAN
+            )
+        elif status.get("is_silent"):
+            self.btn_uac_auto.config(
+                text="⚡ Silent Auto-Elevation",
+                bg="#382E11",
+                fg=COLOR_GOLD
+            )
+        elif status.get("is_prompt"):
+            self.btn_uac_auto.config(
+                text="🔔 Remote UAC Prompt (Desktop)",
                 bg="#103318",
                 fg=COLOR_GREEN
             )
         else:
             self.btn_uac_auto.config(
-                text="⚠️ Auto-Elevation: DISABLED",
-                bg="#382E11",
-                fg=COLOR_GOLD
+                text=f"⚙️ UAC Mode ({status.get('consent')})",
+                bg="#151A24",
+                fg=COLOR_TEXT
             )
 
     def toggle_uac_auto_elevation(self):
@@ -670,25 +700,76 @@ class RenisDesktopApp(tk.Tk):
                 self.relaunch_as_admin()
             return
 
-        is_auto, _ = self.get_uac_status()
-        new_val = not is_auto
+        status = self.get_uac_status()
+        # Toggle between Remote Prompt (5, secure=0) and Factory Default (2, secure=1)
         try:
             import winreg
             with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System", 0, winreg.KEY_SET_VALUE) as key:
-                if new_val:
-                    winreg.SetValueEx(key, "PromptOnSecureDesktop", 0, winreg.REG_DWORD, 0)
-                    winreg.SetValueEx(key, "ConsentPromptBehaviorAdmin", 0, winreg.REG_DWORD, 0)
-                    winreg.SetValueEx(key, "EnableUIADesktopToggle", 0, winreg.REG_DWORD, 1)
-                    self.log("UAC Policy: Silent Auto-Elevation ENABLED (Setups and installers can be remotely controlled).")
-                    messagebox.showinfo("UAC Auto-Elevation", "Silent Auto-Elevation is now ACTIVE.\n\nInstallers, setups, and administrative tasks will execute directly without blocking remote touch/mouse input.")
+                if status.get("is_prompt"):
+                    # Revert to factory default
+                    winreg.SetValueEx(key, "PromptOnSecureDesktop", 0, winreg.REG_DWORD, 1)
+                    winreg.SetValueEx(key, "ConsentPromptBehaviorAdmin", 0, winreg.REG_DWORD, 2)
+                    self.log("[UAC] Factory Default Restored: PromptOnSecureDesktop=1, ConsentPromptBehaviorAdmin=2.")
+                    messagebox.showinfo("UAC Policy", "Standard Windows Factory Security restored:\n• Prompts on Secure Desktop\n• Normal UAC security verification")
                 else:
+                    # Switch to remote desktop prompt
+                    winreg.SetValueEx(key, "PromptOnSecureDesktop", 0, winreg.REG_DWORD, 0)
                     winreg.SetValueEx(key, "ConsentPromptBehaviorAdmin", 0, winreg.REG_DWORD, 5)
-                    self.log("UAC Policy: Default Prompt Restored.")
-                    messagebox.showinfo("UAC Auto-Elevation", "Standard Windows UAC Consent prompts restored.")
+                    winreg.SetValueEx(key, "EnableUIADesktopToggle", 0, winreg.REG_DWORD, 1)
+                    self.log("[UAC] Remote UAC Prompt Mode ENABLED (Consent=5, Secure=0 for stream viewing).")
+                    messagebox.showinfo("UAC Policy", "Remote UAC Prompt Mode is now ACTIVE:\n• Prompts appear on regular desktop so mobile client can view and accept them with 'UAC YES'.")
             self.update_uac_ui()
         except Exception as e:
             self.log(f"Failed to toggle UAC policy: {e}")
             messagebox.showerror("Error", f"Could not update registry:\n{e}")
+
+    def reset_system_defaults(self):
+        if not self.is_elevated:
+            if messagebox.askyesno("Admin Required", "Restoring Windows factory defaults requires Administrator privileges.\n\nRelaunch as Administrator now?"):
+                self.relaunch_as_admin()
+            return
+
+        msg = (
+            "RESTORE WINDOWS FACTORY DEFAULTS\n\n"
+            "This will completely revert all system modifications made by RENI:\n"
+            "• ConsentPromptBehaviorAdmin -> 2 (Default UAC prompt on Secure Desktop)\n"
+            "• PromptOnSecureDesktop -> 1 (Default Secure Desktop active)\n"
+            "• EnableUIADesktopToggle -> 0 (Disabled)\n"
+            "• SoftwareSASGeneration -> 0 (Remote Ctrl+Alt+Del disabled)\n"
+            "• PowerCFG Lid Close -> Sleep on AC power (Default)\n"
+            "• Windows Firewall -> Port 8765 inbound rule deleted\n\n"
+            "No application will be able to silently run with admin privileges.\n\n"
+            "Proceed with factory restoration?"
+        )
+        if not messagebox.askyesno("Confirm Factory Reset", msg):
+            return
+
+        try:
+            import winreg
+            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System", 0, winreg.KEY_SET_VALUE) as key:
+                winreg.SetValueEx(key, "PromptOnSecureDesktop", 0, winreg.REG_DWORD, 1)
+                winreg.SetValueEx(key, "ConsentPromptBehaviorAdmin", 0, winreg.REG_DWORD, 2)
+                try:
+                    winreg.DeleteValue(key, "EnableUIADesktopToggle")
+                except Exception:
+                    winreg.SetValueEx(key, "EnableUIADesktopToggle", 0, winreg.REG_DWORD, 0)
+                try:
+                    winreg.DeleteValue(key, "SoftwareSASGeneration")
+                except Exception:
+                    winreg.SetValueEx(key, "SoftwareSASGeneration", 0, winreg.REG_DWORD, 0)
+
+            os.system("powercfg /setacvalueindex SCHEME_CURRENT SUB_BUTTONS LIDACTION 1")
+            os.system("powercfg /change standby-timeout-ac 30")
+            os.system("powercfg /setactive SCHEME_CURRENT")
+            os.system('netsh advfirewall firewall delete rule name="RENI Remote Server (Port 8765)" >nul 2>&1')
+            os.system('netsh advfirewall firewall delete rule name="RENI Nitro Server (Port 8765)" >nul 2>&1')
+
+            self.update_uac_ui()
+            self.log("[+] [RESET] Windows factory security policies successfully restored.")
+            messagebox.showinfo("Success", "Windows Factory Security Policies Restored Successfully!\n\nAll UAC, Secure Desktop, SAS, Power, and Firewall settings are back to Microsoft defaults.")
+        except Exception as e:
+            self.log(f"[-] [RESET] Error restoring factory defaults: {e}")
+            messagebox.showerror("Error", f"Failed to restore factory defaults:\n{e}")
 
     def configure_lid_power(self):
         if sys.platform == 'win32':

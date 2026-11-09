@@ -176,6 +176,18 @@ This script automatically:
 4. Creates a Python virtual environment at `RENIS\venv` and installs all dependencies from `RENIS\requirements.txt`.
 5. Registers a Windows Scheduled Task (`RENIS_AutoStart`) configured with `/RL HIGHEST`.
 
+### Step 1B: System Security Reset & Uninstall (Revert All Changes Anytime)
+If you wish to restore your Windows workstation to Microsoft factory security defaults or uninstall RENI modifications, run:
+```cmd
+reset_windows_security_defaults.bat
+```
+Or click the **`🛡️ Reset Windows Defaults`** button in the Native Desktop GUI or Host Dashboard. This automatically:
+- Restores `PromptOnSecureDesktop = 1` (Secure Desktop enabled)
+- Restores `ConsentPromptBehaviorAdmin = 2` (Default UAC consent prompt on Secure Desktop)
+- Disables Software SAS generation (removes simulated Ctrl+Alt+Del access)
+- Deletes the Port 8765 inbound Windows Firewall rules
+- Restores default PowerCFG lid-close sleep behavior
+
 ### Step 2: Start the RENI Server
 Run the launcher:
 ```cmd
