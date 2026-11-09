@@ -50,11 +50,15 @@ if defined IS_CLI (
 
 :: Locate Python executable
 set "PYTHON_EXE="
+set "PYTHONW_EXE="
 if exist "RENIS\venv\Scripts\python.exe" (
     set "PYTHON_EXE=RENIS\venv\Scripts\python.exe"
+    if exist "RENIS\venv\Scripts\pythonw.exe" set "PYTHONW_EXE=RENIS\venv\Scripts\pythonw.exe"
 ) else (
     where.exe python.exe >nul 2>&1
     if %errorLevel% equ 0 set "PYTHON_EXE=python"
+    where.exe pythonw.exe >nul 2>&1
+    if %errorLevel% equ 0 set "PYTHONW_EXE=pythonw"
 )
 
 if not defined PYTHON_EXE (
@@ -66,11 +70,20 @@ if not defined PYTHON_EXE (
 )
 
 :: Launch the target application
-"%PYTHON_EXE%" "%TARGET_SCRIPT%" %*
-
-if %errorLevel% neq 0 (
-    echo.
-    echo [-] RENI application exited with code %errorLevel%.
-    echo [*] Check logs above or run setup_renis_admin.bat if dependencies are missing.
-    pause
+if defined IS_CLI (
+    "%PYTHON_EXE%" "%TARGET_SCRIPT%" %*
+    if %errorLevel% neq 0 (
+        echo.
+        echo [-] RENI application exited with code %errorLevel%.
+        echo [*] Check logs above or run setup_renis_admin.bat if dependencies are missing.
+        pause
+    )
+) else (
+    :: Launch GUI cleanly via pythonw so no fragile command prompt window stays open!
+    if defined PYTHONW_EXE (
+        start "" "%PYTHONW_EXE%" "%TARGET_SCRIPT%" %*
+    ) else (
+        start "" "%PYTHON_EXE%" "%TARGET_SCRIPT%" %*
+    )
+    exit /b 0
 )

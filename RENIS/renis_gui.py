@@ -500,8 +500,31 @@ class RenisDesktopApp(tk.Tk):
         if not initial:
             self.save_config()
 
+    def is_port_in_use(self, port: int) -> bool:
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.settimeout(0.4)
+                return s.connect_ex(('127.0.0.1', port)) == 0
+        except Exception:
+            return False
+
+    def kill_port_process(self, port: int):
+        try:
+            import psutil
+            for conn in psutil.net_connections(kind='inet'):
+                if conn.laddr.port == port and conn.pid:
+                    try:
+                        p = psutil.Process(conn.pid)
+                        p.terminate()
+                        p.kill()
+                        self.log(f"[+] Reclaimed port {port} (terminated PID {conn.pid}).")
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
     def toggle_server(self):
-        if self.server_proc and self.server_proc.poll() is None:
+        if (self.server_proc and self.server_proc.poll() is None) or self.is_port_in_use(int(self.ent_port.get().strip() or str(self.default_port))):
             self.stop_server()
         else:
             self.start_server()
@@ -510,6 +533,20 @@ class RenisDesktopApp(tk.Tk):
         if self.server_proc and self.server_proc.poll() is None:
             return
         port = self.ent_port.get().strip() or str(self.default_port)
+        port_num = int(port)
+
+        # 1. Connect to active instance if already running
+        if self.is_port_in_use(port_num):
+            self.lbl_srv_status.config(text=f"● SERVER ONLINE (Port {port}) [Active]", fg=COLOR_GREEN)
+            self.btn_srv_toggle.config(text="🔴 STOP SERVER", bg="#381115", fg=COLOR_CRIMSON)
+            self.log(f"[+] Connected to active RENIS Server running on port {port}.")
+            self.update_qr_display()
+
+            if self.auto_start_tunnel_var.get() and (not self.tunnel_proc or self.tunnel_proc.poll() is not None):
+                self.after(500, self.start_tunnel)
+            return
+
+        # 2. Otherwise launch a fresh server
         os.environ["RENIS_PORT"] = port
         cmd = [sys.executable, str(SERVER_DIR / "renis_server.py")]
         self.log(f"Starting RENIS Server on port {port}...")
@@ -546,6 +583,7 @@ class RenisDesktopApp(tk.Tk):
             self.log(f"Failed to start server: {e}")
 
     def stop_server(self):
+        port = self.ent_port.get().strip() or str(self.default_port)
         if self.server_proc:
             self.log("Stopping RENIS Server...")
             try:
@@ -554,6 +592,10 @@ class RenisDesktopApp(tk.Tk):
             except Exception:
                 pass
             self.server_proc = None
+
+        # Clean up any lingering background server process on this port
+        self.kill_port_process(int(port))
+
         self.lbl_srv_status.config(text="● SERVER OFFLINE", fg=COLOR_CRIMSON)
         self.btn_srv_toggle.config(text="🟢 START SERVER", bg="#103318", fg=COLOR_GREEN)
 
@@ -619,6 +661,28 @@ class RenisDesktopApp(tk.Tk):
         param = self.ent_tunnel_param.get().strip()
         port = self.ent_port.get().strip() or str(self.default_port)
         self.save_config()
+
+        # Check if cloudflared is already active in background
+        already_running_cf = False
+        try:
+            import psutil
+            for p in psutil.process_iter(['name']):
+                if 'cloudflared' in p.info['name'].lower():
+                    already_running_cf = True
+                    break
+        except Exception:
+            pass
+
+        if already_running_cf and (not self.tunnel_proc or self.tunnel_proc.poll() is not None):
+            self.lbl_tunnel_status.config(text="● TUNNEL ONLINE (Active)", fg=COLOR_GREEN)
+            self.btn_tunnel_toggle.config(text="🔴 STOP TUNNEL", bg="#381115", fg=COLOR_CRIMSON)
+            self.log("[+] Connected to active Cloudflare Tunnel instance.")
+            custom_url = self.saved_config.get("custom_tunnel_url", "")
+            if custom_url:
+                self.tunnel_url = custom_url
+                self.qr_target_var.set("tunnel")
+                self.update_qr_display()
+            return
 
         cmd = [binary, "tunnel"]
         if mode == "quick":
@@ -689,6 +753,20 @@ class RenisDesktopApp(tk.Tk):
             except Exception:
                 pass
             self.tunnel_proc = None
+
+        # Clean up any lingering background cloudflared processes
+        try:
+            import psutil
+            for p in psutil.process_iter(['name']):
+                if 'cloudflared' in p.info['name'].lower():
+                    try:
+                        p.terminate()
+                        p.kill()
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
         self.tunnel_url = ""
         self.lbl_tunnel_status.config(text="● TUNNEL OFFLINE", fg=COLOR_CRIMSON)
         self.btn_tunnel_toggle.config(text="☁️ START TUNNEL", bg="#112938", fg=COLOR_CYAN)
