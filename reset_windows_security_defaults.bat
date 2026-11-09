@@ -76,3 +76,4 @@ echo   - Port 8765 is closed in Windows Firewall.
 echo   - Normal lid-close sleep behavior is re-enabled.
 echo.
 pause
+

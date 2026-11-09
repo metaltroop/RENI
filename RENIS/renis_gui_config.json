@@ -1,0 +1,7 @@
+{
+  "tunnel_mode": "named",
+  "tunnel_param": "reni",
+  "auto_start_tunnel": true,
+  "custom_tunnel_url": "",
+  "last_saved": "2026-11-09 15:50:00"
+}

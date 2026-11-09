@@ -69,6 +69,8 @@ class RenisDesktopApp(tk.Tk):
         self.discovered_ips = self.get_lan_ips()
         self.default_port = 8765
         self.is_elevated = self.check_elevation()
+        self.config_path = SERVER_DIR / "renis_gui_config.json"
+        self.saved_config = self.load_config()
 
         self.setup_styles()
         self.build_ui()
@@ -95,6 +97,43 @@ class RenisDesktopApp(tk.Tk):
             batch_path = str(SERVER_DIR.parent / "start_reni.bat")
             ctypes.windll.shell32.ShellExecuteW(None, "runas", batch_path, "", str(SERVER_DIR.parent), 1)
             self.destroy()
+
+    def load_config(self):
+        default_cfg = {
+            "tunnel_mode": "named",
+            "tunnel_param": "reni",
+            "auto_start_tunnel": True,
+            "custom_tunnel_url": ""
+        }
+        if self.config_path.exists():
+            try:
+                with open(self.config_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    default_cfg.update(data)
+            except Exception:
+                pass
+        return default_cfg
+
+    def save_config(self):
+        try:
+            if not hasattr(self, 'tunnel_mode_var') or not hasattr(self, 'ent_tunnel_param'):
+                return
+            mode = self.tunnel_mode_var.get()
+            param = self.ent_tunnel_param.get().strip()
+            if mode == "quick":
+                param = ""
+            cfg = {
+                "tunnel_mode": mode,
+                "tunnel_param": param,
+                "auto_start_tunnel": bool(self.auto_start_tunnel_var.get()) if hasattr(self, 'auto_start_tunnel_var') else True,
+                "custom_tunnel_url": getattr(self, "tunnel_url", "") or self.saved_config.get("custom_tunnel_url", ""),
+                "last_saved": time.strftime("%Y-%m-%d %H:%M:%S")
+            }
+            with open(self.config_path, "w", encoding="utf-8") as f:
+                json.dump(cfg, f, indent=2)
+            self.saved_config.update(cfg)
+        except Exception:
+            pass
 
     def get_lan_ips(self):
         ips = []
@@ -195,22 +234,29 @@ class RenisDesktopApp(tk.Tk):
         mode_row = tk.Frame(card_tunnel, bg=COLOR_CARD)
         mode_row.pack(fill="x", padx=12, pady=4)
 
-        self.tunnel_mode_var = tk.StringVar(value="quick")
+        saved_mode = self.saved_config.get("tunnel_mode", "named")
+        self.tunnel_mode_var = tk.StringVar(value=saved_mode)
+        self.auto_start_tunnel_var = tk.BooleanVar(value=self.saved_config.get("auto_start_tunnel", True))
 
-        rb_quick = tk.Radiobutton(mode_row, text="⚡ Quick Free (trycloudflare)", variable=self.tunnel_mode_var, value="quick",
+        rb_quick = tk.Radiobutton(mode_row, text="⚡ Quick Free", variable=self.tunnel_mode_var, value="quick",
                                   bg=COLOR_CARD, fg=COLOR_TEXT, selectcolor="#0B0C10", activebackground=COLOR_CARD,
                                   font=("Rajdhani", 10, "bold"), command=self.on_tunnel_mode_change)
-        rb_quick.pack(side="left", padx=(0, 10))
+        rb_quick.pack(side="left", padx=(0, 6))
 
         rb_token = tk.Radiobutton(mode_row, text="🔑 Token", variable=self.tunnel_mode_var, value="token",
                                   bg=COLOR_CARD, fg=COLOR_TEXT, selectcolor="#0B0C10", activebackground=COLOR_CARD,
                                   font=("Rajdhani", 10), command=self.on_tunnel_mode_change)
-        rb_token.pack(side="left", padx=10)
+        rb_token.pack(side="left", padx=6)
 
         rb_named = tk.Radiobutton(mode_row, text="🏷️ Named Tunnel", variable=self.tunnel_mode_var, value="named",
                                   bg=COLOR_CARD, fg=COLOR_TEXT, selectcolor="#0B0C10", activebackground=COLOR_CARD,
                                   font=("Rajdhani", 10), command=self.on_tunnel_mode_change)
-        rb_named.pack(side="left", padx=10)
+        rb_named.pack(side="left", padx=6)
+
+        cb_auto = tk.Checkbutton(mode_row, text="⚡ Auto-Connect on Boot", variable=self.auto_start_tunnel_var,
+                                 bg=COLOR_CARD, fg=COLOR_CYAN, selectcolor="#0B0C10", activebackground=COLOR_CARD,
+                                 font=("Rajdhani", 9, "bold"), command=self.save_config)
+        cb_auto.pack(side="right")
 
         # Tunnel Param Entry Row
         self.param_row = tk.Frame(card_tunnel, bg=COLOR_CARD)
@@ -221,6 +267,8 @@ class RenisDesktopApp(tk.Tk):
 
         self.ent_tunnel_param = tk.Entry(self.param_row, bg="#0B0C10", fg=COLOR_TEXT, insertbackground=COLOR_TEXT, relief="flat", font=("JetBrains Mono", 9))
         self.ent_tunnel_param.pack(side="left", fill="x", expand=True, padx=(6, 0))
+        self.ent_tunnel_param.bind("<FocusOut>", lambda e: self.save_config())
+        self.ent_tunnel_param.bind("<Return>", lambda e: self.save_config())
 
         # Tunnel Action Buttons Row
         tun_btn_row = tk.Frame(card_tunnel, bg=COLOR_CARD)
@@ -345,7 +393,7 @@ class RenisDesktopApp(tk.Tk):
         self.bind_hover(btn_copy_qr, "#1C2130", "#253147")
 
         # Initial display
-        self.on_tunnel_mode_change()
+        self.on_tunnel_mode_change(initial=True)
         self.log("[*] RENIS Desktop Control Center initialized.")
         self.update_qr_display()
 
@@ -400,23 +448,29 @@ class RenisDesktopApp(tk.Tk):
         self.txt_logs.insert(tk.END, message + "\n", tag)
         self.txt_logs.see(tk.END)
 
-    def on_tunnel_mode_change(self):
+    def on_tunnel_mode_change(self, initial: bool = False):
         mode = self.tunnel_mode_var.get()
         if mode == "quick":
             self.lbl_tunnel_param.config(text="Mode Info:")
+            self.ent_tunnel_param.config(state="normal")
             self.ent_tunnel_param.delete(0, tk.END)
             self.ent_tunnel_param.insert(0, "Auto-generates free public *.trycloudflare.com URL")
             self.ent_tunnel_param.config(state="disabled")
         elif mode == "token":
             self.lbl_tunnel_param.config(text="Token:")
             self.ent_tunnel_param.config(state="normal")
-            self.ent_tunnel_param.delete(0, tk.END)
-            self.ent_tunnel_param.insert(0, "eyJhIjoi...")
+            if not initial:
+                self.ent_tunnel_param.delete(0, tk.END)
+                saved_token = self.saved_config.get("tunnel_param", "") if self.saved_config.get("tunnel_mode") == "token" else ""
+                self.ent_tunnel_param.insert(0, saved_token or "eyJhIjoi...")
         elif mode == "named":
             self.lbl_tunnel_param.config(text="Tunnel Name:")
             self.ent_tunnel_param.config(state="normal")
             self.ent_tunnel_param.delete(0, tk.END)
-            self.ent_tunnel_param.insert(0, "reni")
+            saved_name = self.saved_config.get("tunnel_param", "reni")
+            self.ent_tunnel_param.insert(0, saved_name or "reni")
+        if not initial:
+            self.save_config()
 
     def toggle_server(self):
         if self.server_proc and self.server_proc.poll() is None:
@@ -453,6 +507,13 @@ class RenisDesktopApp(tk.Tk):
 
             threading.Thread(target=stream_logs, args=(self.server_proc,), daemon=True).start()
             self.update_qr_display()
+
+            # Automatically launch Cloudflare Tunnel if configured to auto-connect
+            if self.auto_start_tunnel_var.get() and (not self.tunnel_proc or self.tunnel_proc.poll() is not None):
+                mode = self.tunnel_mode_var.get()
+                param = self.ent_tunnel_param.get().strip()
+                self.log(f"[*] Auto-connecting Cloudflare Tunnel ({mode}: {param})...")
+                self.after(1000, self.start_tunnel)
         except Exception as e:
             self.log(f"Failed to start server: {e}")
 
@@ -529,6 +590,7 @@ class RenisDesktopApp(tk.Tk):
         mode = self.tunnel_mode_var.get()
         param = self.ent_tunnel_param.get().strip()
         port = self.ent_port.get().strip() or str(self.default_port)
+        self.save_config()
 
         cmd = [binary, "tunnel"]
         if mode == "quick":
@@ -566,13 +628,23 @@ class RenisDesktopApp(tk.Tk):
                         if match:
                             self.tunnel_url = match.group(0)
                             self.after(0, lambda u=self.tunnel_url: self.on_tunnel_connected(u))
-                        elif "Registered tunnel connection" in clean:
-                            self.after(0, lambda: self.lbl_tunnel_status.config(text="● TUNNEL ONLINE", fg=COLOR_GREEN))
+                        elif any(k in clean for k in ["Registered tunnel connection", "Connection registered", "connIndex="]):
+                            self.after(0, lambda n=param or "reni": self.on_named_tunnel_connected(n))
                         self.after(0, lambda m=clean: self.log(f"[TUNNEL] {m}"))
 
             threading.Thread(target=read_tunnel_stream, args=(self.tunnel_proc,), daemon=True).start()
         except Exception as e:
             self.log(f"Failed to launch tunnel: {e}")
+
+    def on_named_tunnel_connected(self, name: str):
+        self.lbl_tunnel_status.config(text=f"● ONLINE (named: {name})", fg=COLOR_GREEN)
+        self.btn_tunnel_toggle.config(text="🔴 STOP TUNNEL", bg="#381115", fg=COLOR_CRIMSON)
+        self.log(f"[+] [TUNNEL] Named Tunnel '{name}' registered and active.")
+        custom_url = self.saved_config.get("custom_tunnel_url", "")
+        if custom_url:
+            self.tunnel_url = custom_url
+            self.qr_target_var.set("tunnel")
+            self.update_qr_display()
 
     def on_tunnel_connected(self, url: str):
         self.tunnel_url = url
