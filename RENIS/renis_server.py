@@ -431,13 +431,25 @@ def check_and_elevate():
         except Exception as e:
             print(f"[-] [UAC] Error requesting elevation: {e}")
     else:
-        # Automatically ensure UAC auto-elevation is active so remote users can install apps without input freeze
+        # Automatically ensure UAC remote access policies are active
         try:
-            res = set_windows_uac_auto_elevation(True)
-            if res.get("success"):
-                print("[+] [UAC] Windows Remote Auto-Elevation ACTIVE (ConsentPromptBehaviorAdmin=0, PromptOnSecureDesktop=0).")
-        except Exception:
-            pass
+            import winreg
+            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System", 0, winreg.KEY_READ | winreg.KEY_SET_VALUE) as key:
+                winreg.SetValueEx(key, "PromptOnSecureDesktop", 0, winreg.REG_DWORD, 0)
+                winreg.SetValueEx(key, "EnableUIADesktopToggle", 0, winreg.REG_DWORD, 1)
+                winreg.SetValueEx(key, "SoftwareSASGeneration", 0, winreg.REG_DWORD, 3)
+                try:
+                    curr_consent, _ = winreg.QueryValueEx(key, "ConsentPromptBehaviorAdmin")
+                except Exception:
+                    curr_consent = 5
+                # If set to default secure prompt (2), switch to standard desktop prompt (5) so remote screen can see it
+                if curr_consent == 2:
+                    winreg.SetValueEx(key, "ConsentPromptBehaviorAdmin", 0, winreg.REG_DWORD, 5)
+                    curr_consent = 5
+                mode_str = "Prompt for Consent (5)" if curr_consent == 5 else f"Mode ({curr_consent})"
+                print(f"[+] [UAC] Windows Remote UAC Policy ACTIVE: PromptOnSecureDesktop=0, ConsentPromptBehaviorAdmin={mode_str}.")
+        except Exception as e:
+            print(f"[-] [UAC] Warning configuring UAC policy: {e}")
 
 # ==============================================================================
 # ULTRA-RESILIENT LOW-LEVEL INPUT INJECTION ENGINE (WIN32 + PYAUTOGUI FALLBACK)

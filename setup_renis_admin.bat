@@ -23,13 +23,13 @@ echo.
 echo [*] [STEP 1/5] Configuring Windows UAC Policy for Remote Viewing and Administration...
 reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" /v PromptOnSecureDesktop /t REG_DWORD /d 0 /f >nul 2>&1
 reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" /v EnableUIADesktopToggle /t REG_DWORD /d 1 /f >nul 2>&1
-reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" /v ConsentPromptBehaviorAdmin /t REG_DWORD /d 0 /f >nul 2>&1
+reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" /v ConsentPromptBehaviorAdmin /t REG_DWORD /d 5 /f >nul 2>&1
 reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" /v SoftwareSASGeneration /t REG_DWORD /d 3 /f >nul 2>&1
 if %errorLevel% equ 0 (
     echo [+] Successfully configured Windows UAC and Logon Policies:
     echo     - PromptOnSecureDesktop = 0 (Displays elevation dialogs on desktop for remote viewing)
     echo     - EnableUIADesktopToggle = 1 (Enables desktop assistive switching)
-    echo     - ConsentPromptBehaviorAdmin = 0 (Silent auto-elevation: setups/installers run without blocking remote touch/mouse)
+    echo     - ConsentPromptBehaviorAdmin = 5 (Prompt for consent on interactive desktop - testable with remote UAC YES)
     echo     - SoftwareSASGeneration = 3 (Enables remote Ctrl+Alt+Del and lock screen password input injection)
 ) else (
     echo [-] Warning: Failed to set UAC registry values. Ensure script was run as Administrator.
