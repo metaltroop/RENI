@@ -54,7 +54,14 @@ netsh advfirewall firewall delete rule name="RENI Nitro Server (Port 8765)" >nul
 echo [+] Inbound firewall rules for Port 8765 removed.
 
 echo.
-echo [*] [STEP 4/4] Optional Test Executable Cleanup...
+echo [*] [STEP 4/5] Removing Startup Shortcuts and Scheduled Tasks...
+del /f /q "%APPDATA%\Microsoft\Windows\Start Menu\Programs\RENI.lnk" >nul 2>&1
+del /f /q "%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\RENI.lnk" >nul 2>&1
+schtasks /delete /tn "RENIS_AutoStart" /f >nul 2>&1
+echo [+] Startup shortcuts and Scheduled Task removed.
+
+echo.
+echo [*] [STEP 5/5] Optional Test Executable Cleanup...
 if exist "test_uac_elevation.exe" (
     echo     [i] Found test_uac_elevation.exe. Removing test binaries...
     del /f /q "test_uac_elevation.exe" >nul 2>&1

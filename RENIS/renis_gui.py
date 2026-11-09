@@ -39,6 +39,13 @@ try:
 except ImportError:
     qrcode = None
 
+try:
+    import pystray
+    from pystray import MenuItem as tray_item
+except ImportError:
+    pystray = None
+    tray_item = None
+
 # Color Palette: Cyberpunk Obsidian / Neon Crimson / N2O Cyan
 COLOR_BG = "#0B0C10"
 COLOR_CARD = "#14161D"
@@ -72,13 +79,26 @@ class RenisDesktopApp(tk.Tk):
         self.config_path = SERVER_DIR / "renis_gui_config.json"
         self.saved_config = self.load_config()
 
+        # Set window icon
+        icon_path = SERVER_DIR / "reni_icon.ico"
+        if icon_path.exists():
+            try:
+                self.iconbitmap(str(icon_path))
+            except Exception:
+                pass
+
         self.setup_styles()
         self.build_ui()
         self.check_cloudflared_status()
         self.update_uac_ui()
 
-        # Handle window close
-        self.protocol("WM_DELETE_WINDOW", self.on_exit)
+        # Initialize System Tray & Windows Shortcuts
+        self.tray_icon = None
+        self.setup_tray()
+        self.ensure_shortcuts()
+
+        # Handle window close: minimize to system tray
+        self.protocol("WM_DELETE_WINDOW", self.hide_to_tray)
 
     def check_elevation(self):
         if sys.platform == 'win32':
@@ -188,10 +208,18 @@ class RenisDesktopApp(tk.Tk):
                                      relief="flat", cursor="hand2", padx=8, pady=2, command=self.relaunch_as_admin)
             btn_relaunch.pack(side="left", padx=2)
 
+        btn_exit = tk.Button(header, text="✕ Exit", bg="#2A1014", fg=COLOR_CRIMSON, font=("Rajdhani", 9, "bold"),
+                             relief="flat", cursor="hand2", padx=10, pady=4, command=self.quit_completely)
+        btn_exit.pack(side="right", padx=(0, 12), pady=10)
+
+        btn_min_tray = tk.Button(header, text="🗕 Minimize to Tray", bg="#151A24", fg=COLOR_MUTED, font=("Rajdhani", 9),
+                                 relief="flat", cursor="hand2", padx=10, pady=4, command=self.hide_to_tray)
+        btn_min_tray.pack(side="right", padx=4, pady=10)
+
         btn_dash = tk.Button(header, text="🌐 Open Host Dashboard", bg="#1C2130", fg=COLOR_CYAN, font=("Rajdhani", 10, "bold"),
                              relief="flat", cursor="hand2", padx=12, pady=4, activebackground=COLOR_CYAN, activeforeground=COLOR_BG,
                              command=lambda: webbrowser.open(f"http://localhost:{self.default_port}/dashboard"))
-        btn_dash.pack(side="right", padx=12, pady=10)
+        btn_dash.pack(side="right", padx=6, pady=10)
 
         # 2. MAIN SPLIT BODY
         main_body = tk.Frame(self, bg=COLOR_BG)
@@ -890,10 +918,78 @@ class RenisDesktopApp(tk.Tk):
         except Exception as e:
             self.log(f"[-] Blackout toggle error: {e}")
 
-    def on_exit(self):
+    def setup_tray(self):
+        if not pystray or not Image:
+            return
+
+        tray_img_path = SERVER_DIR / "reni_icon.png"
+        if tray_img_path.exists():
+            try:
+                tray_img = Image.open(tray_img_path)
+            except Exception:
+                tray_img = Image.new('RGBA', (64, 64), (0, 240, 255, 255))
+        else:
+            tray_img = Image.new('RGBA', (64, 64), (0, 240, 255, 255))
+
+        menu = pystray.Menu(
+            tray_item('⚡ Open Control Center', lambda: self.after(0, self.show_window), default=True),
+            tray_item('📱 Copy Connect URL', lambda: self.after(0, self.copy_active_connect_url)),
+            pystray.Menu.SEPARATOR,
+            tray_item('☁️ Start / Stop Tunnel', lambda: self.after(0, self.toggle_tunnel)),
+            tray_item('🌑 Toggle Privacy Blackout', lambda: self.after(0, self.toggle_privacy_blackout)),
+            pystray.Menu.SEPARATOR,
+            tray_item('❌ Exit RENI Completely', lambda: self.after(0, self.quit_completely))
+        )
+
+        try:
+            self.tray_icon = pystray.Icon("RENI", tray_img, "RENI // Remote Control Center", menu)
+            threading.Thread(target=self.tray_icon.run, daemon=True).start()
+        except Exception as e:
+            self.log(f"Warning initializing System Tray: {e}")
+
+    def hide_to_tray(self):
+        self.withdraw()
+        self.log("[i] Minimized to System Tray. Double-click tray icon to restore.")
+        if self.tray_icon:
+            try:
+                self.tray_icon.notify("RENI is still active in the background.\nDouble-click the tray icon anytime to open.", "RENI Background Service")
+            except Exception:
+                pass
+
+    def show_window(self):
+        self.deiconify()
+        self.lift()
+        self.focus_force()
+        self.attributes("-topmost", True)
+        self.after(150, lambda: self.attributes("-topmost", False))
+
+    def quit_completely(self):
+        if self.tray_icon:
+            try:
+                self.tray_icon.stop()
+            except Exception:
+                pass
         self.stop_tunnel()
         self.stop_server()
         self.destroy()
+        sys.exit(0)
+
+    def on_exit(self):
+        self.hide_to_tray()
+
+    def ensure_shortcuts(self):
+        ps1_path = SERVER_DIR.parent / "tools" / "create_shortcuts.ps1"
+        if ps1_path.exists():
+            def run_sc():
+                try:
+                    subprocess.run(
+                        ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(ps1_path)],
+                        creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0,
+                        timeout=10
+                    )
+                except Exception:
+                    pass
+            threading.Thread(target=run_sc, daemon=True).start()
 
 
 def main():

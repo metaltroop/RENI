@@ -85,13 +85,21 @@ if %errorLevel% neq 0 (
 
 :: 6. Create Windows Scheduled Task for AutoStart with Highest Privileges
 echo.
-echo [*] [STEP 5/5] Registering Windows Scheduled Task for AutoStart (Highest Privileges)...
+echo [*] [STEP 5/6] Registering Windows Scheduled Task for AutoStart (Highest Privileges)...
 set "LAUNCH_CMD=%~dp0start_reni.bat"
 schtasks /create /tn "RENIS_AutoStart" /tr "\"%LAUNCH_CMD%\"" /sc onlogon /rl HIGHEST /f >nul 2>&1
 if %errorLevel% equ 0 (
     echo [+] Scheduled Task 'RENIS_AutoStart' created with highest administrative privileges.
 ) else (
     echo [-] Warning: Failed to register Scheduled Task.
+)
+
+:: 7. Create Start Menu & Startup Shortcuts
+echo.
+echo [*] [STEP 6/6] Creating Windows Start Menu and Task Manager Startup Shortcuts...
+if exist "tools\create_shortcuts.ps1" (
+    powershell -NoProfile -ExecutionPolicy Bypass -File "tools\create_shortcuts.ps1" >nul 2>&1
+    echo [+] Shortcuts registered in Start Menu and Task Manager Startup apps list.
 )
 
 echo.
